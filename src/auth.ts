@@ -82,6 +82,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   session: { strategy: "jwt" },
   callbacks: {
+    // @ts-expect-error - callbacks might not be present in authConfig
     ...authConfig.callbacks,
     async signIn({ user }) {
       if (!user.id) return true;
