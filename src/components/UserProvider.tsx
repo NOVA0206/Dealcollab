@@ -4,6 +4,38 @@ import { useNotifications } from './NotificationProvider';
 import { useSession, signOut } from 'next-auth/react';
 import { createSupabaseClient } from '@/utils/supabase/client';
 
+export interface UserProfile {
+  id: string;
+  name: string | null;
+  email: string;
+  phone: string | null;
+  is_phone_verified: boolean;
+  profile_completion: number;
+  tokens: number;
+  firm_name: string | null;
+  role: string | null;
+  category: string[] | null;
+  custom_category: string | null;
+  base_location: string | null;
+  geographies: string[] | null;
+  cross_border: boolean;
+  corridors: string | null;
+  sectors: string[] | null;
+  intent: string | null;
+  priority_sectors: string[] | null;
+  co_advisory: boolean;
+  collaboration_model: string[] | null;
+  additional_info: string | null;
+  // Mapped/Alias fields used in frontend
+  fullName?: string | null;
+  firmName?: string | null;
+  customCategory?: string | null;
+  baseLocation?: string | null;
+  crossBorder?: boolean;
+  additionalInfo?: string | null;
+  profileCompletion?: number;
+}
+
 interface UserContextType {
   tokens: number;
   approvedDeals: number[];
@@ -33,7 +65,7 @@ interface UserContextType {
   totalScore: number;
   globalError: string | null;
   setGlobalError: (error: string | null) => void;
-  profile: any | null;
+  profile: UserProfile | null;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -44,9 +76,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [supabase] = useState(() => createSupabaseClient());
   
   const [tokens, setTokens] = useState(0);
-  const [profile, setProfile] = useState<any | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [approvedDeals, setApprovedDeals] = useState<number[]>([]);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const isAuthenticated = status === 'authenticated';
   const [globalError, setGlobalError] = useState<string | null>(null);
   
   const [onboarding, setOnboardingState] = useState({
@@ -72,7 +104,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (!userEmail) return;
 
       console.log("FETCHING SUPABASE DATA FOR EMAIL:", userEmail);
-      setIsAuthenticated(true);
       
       const { data, error } = await supabase
         .from("users")
@@ -109,20 +140,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     if (status === 'authenticated') {
       fetchSupabaseData();
-    } else if (status === 'unauthenticated') {
-      setIsAuthenticated(false);
-      setTokens(0);
-      setProfile(null);
     }
   }, [status, session, supabase]);
 
   const login = useCallback(() => {
-    setIsAuthenticated(true);
+    // Auth is managed by NextAuth status
   }, []);
 
   const logout = useCallback(async (reason?: 'session_expired' | 'link_expired') => {
-    setIsAuthenticated(false);
     setProfile(null);
+    setTokens(0);
+    setApprovedDeals([]);
     setOnboardingState({
       phoneVerified: false,
       profileCompleted: false,
@@ -210,12 +238,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
   }, [addNotification]);
 
-  const canSendEOI = tokens > 0;
+  const canSendEOI = (status === 'authenticated' ? tokens : 0) > 0;
 
   return (
     <UserContext.Provider value={{ 
-      tokens, 
-      profile,
+      tokens: status === 'authenticated' ? tokens : 0, 
+      profile: status === 'authenticated' ? profile : null,
       approvedDeals, 
       isEOIApproved, 
       approveEOI, 
@@ -223,7 +251,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated, 
       login, 
       logout,
-      onboarding, 
+      onboarding: status === 'authenticated' ? onboarding : {
+        phoneVerified: false,
+        profileCompleted: false,
+        dealSubmitted: false,
+      }, 
       setOnboarding, 
       readinessScore, 
       updateReadiness, 
