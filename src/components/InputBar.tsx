@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Plus, ArrowUp, Lock, Sparkles } from 'lucide-react';
 import { useUser } from './UserProvider';
 
@@ -8,11 +8,26 @@ interface InputBarProps {
 }
 
 export default function InputBar({ onSendMessage }: InputBarProps) {
-  const { setOnboarding, totalScore } = useUser();
+  const { setOnboarding } = useUser();
   const [isFocused, setIsFocused] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isDisabled = false; // Profile completion requirement removed as per user request
+
+  const handlePlusClick = () => {
+    console.log('Plus button clicked');
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      console.log('File selected:', file.name);
+      // Optional: auto-fill message with filename or handle upload
+      setInputValue(prev => prev + (prev ? ' ' : '') + `[Attached: ${file.name}]`);
+    }
+  };
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -31,6 +46,13 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
 
   return (
     <div className="w-full max-w-4xl mx-auto pb-8 pt-4">
+      <input 
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+        accept=".pdf,.doc,.docx,.txt,image/*"
+      />
       <form 
         id="chat-input-area"
         onSubmit={handleSubmit}
@@ -45,7 +67,8 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
         <button 
           type="button"
           disabled={isDisabled}
-          className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-brand-secondary hover:text-foreground hover:bg-gray-50 transition-all duration-200 disabled:cursor-not-allowed active:scale-90"
+          onClick={handlePlusClick}
+          className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-brand-secondary hover:text-foreground hover:bg-gray-50 transition-all duration-200 disabled:cursor-not-allowed active:scale-90 relative z-50 pointer-events-auto"
         >
           <Plus size={20} />
         </button>
