@@ -1,0 +1,133 @@
+'use client';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useUser } from '@/components/UserProvider';
+import { Sparkles, Loader2 } from 'lucide-react';
+import ProfileStepper, { ProfileData } from '@/components/profile-setup/ProfileStepper';
+import ProfileView from '@/components/profile-setup/ProfileView';
+import ProfileSuccessScreen from '@/components/profile-setup/ProfileSuccessScreen';
+
+export default function ProfilePage() {
+   const { onboarding } = useUser();
+   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [isEditing, setIsEditing] = useState(false);
+   const [showSuccess, setShowSuccess] = useState(false);
+
+   const fetchProfile = useCallback(async () => {
+      try {
+         const res = await fetch('/api/profile');
+         const data = await res.json();
+         setProfileData(data);
+      } catch (err) {
+         console.error('Failed to fetch profile:', err);
+      } finally {
+         setLoading(false);
+      }
+   }, []);
+
+   useEffect(() => {
+      queueMicrotask(() => {
+         fetchProfile();
+      });
+   }, [fetchProfile]);
+
+   const handleComplete = (shouldShowSuccess?: boolean) => {
+      setIsEditing(false);
+      if (shouldShowSuccess) {
+         setShowSuccess(true);
+      }
+      fetchProfile();
+   };
+
+   if (loading) {
+      return (
+         <div className="flex-1 flex items-center justify-center bg-[#F9FAFB]">
+            <div className="flex flex-col items-center gap-4">
+               <Loader2 className="w-10 h-10 text-brand-accent animate-spin" />
+               <p className="text-sm font-bold text-brand-secondary uppercase tracking-widest">Loading Deal Intelligence...</p>
+            </div>
+         </div>
+      );
+   }
+
+   if (showSuccess) {
+      return <ProfileSuccessScreen onDashboardClick={() => {
+         setShowSuccess(false);
+         setIsEditing(false);
+      }} />;
+   }
+
+   // If onboarding not completed and not currently editing, show onboarding
+   if (!onboarding.profileCompleted && !isEditing) {
+      return (
+         <div className="flex-1 flex flex-col w-full bg-[#F9FAFB] relative min-h-screen">
+            <HeroSection />
+            <div className="w-full bg-gray-50/50">
+               <ProfileStepper 
+                  onComplete={handleComplete} 
+                  initialData={profileData}
+               />
+            </div>
+         </div>
+      );
+   }
+
+   return (
+      <div className="flex-1 flex flex-col w-full bg-[#F9FAFB] relative min-h-screen">
+         {isEditing ? (
+            <div className="w-full py-12">
+               <div className="max-w-5xl mx-auto px-6 mb-8 flex justify-between items-center">
+                  <h2 className="text-2xl font-black text-foreground tracking-tight">Update Your Profile</h2>
+                  <button 
+                     onClick={() => setIsEditing(false)}
+                     className="text-sm font-bold text-brand-secondary hover:text-brand-accent transition-colors"
+                  >
+                     Cancel Changes
+                  </button>
+               </div>
+               <ProfileStepper 
+                  onComplete={handleComplete} 
+                  onCancel={() => setIsEditing(false)}
+                  initialData={profileData} 
+               />
+            </div>
+         ) : (
+            <>
+               <HeroSection />
+               <div className="w-full bg-gray-50/50">
+                  <ProfileView 
+                     data={profileData} 
+                     onEdit={() => setIsEditing(true)} 
+                  />
+               </div>
+            </>
+         )}
+      </div>
+   );
+}
+
+function HeroSection() {
+   return (
+      <section className="w-full bg-[#0B1B2B] py-20 relative overflow-hidden shrink-0">
+         <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-[#F97316]/5 rounded-full -mr-64 -mt-64 blur-[120px] opacity-30 pointer-events-none" />
+         <div className="max-w-7xl mx-auto px-6 relative z-10">
+            <div className="flex flex-col items-center lg:items-start gap-6 text-center lg:text-left">
+               <div className="flex items-center gap-2 px-4 py-2 bg-white/5 backdrop-blur-md rounded-full border border-white/10">
+                  <div className="bg-[#F97316] text-white p-1 rounded-md shadow-lg">
+                     <Sparkles size={14} />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/80">Professional Intelligence Layer</span>
+               </div>
+               <div className="space-y-4">
+                  <h1 className="text-4xl md:text-6xl font-black text-white leading-tight tracking-tight">
+                     Professional <span className="text-[#F97316]">Intelligence Profile</span>
+                  </h1>
+                  <p className="text-gray-400 font-medium max-w-2xl text-base md:text-lg leading-relaxed">
+                     Your verified profile determines the quality of deal matches and collaborator credibility within the DealCollab network.
+                  </p>
+               </div>
+            </div>
+         </div>
+      </section>
+   );
+}

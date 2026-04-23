@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #1F2937;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand-sidebar: #F3F4F6;
+  --color-brand-card: #F9FAFB;
+  --color-brand-secondary: #6B7280;
+  --color-brand-accent: #F97316;
+  --color-brand-accent-glow: rgba(249,115,22,0.1);
+  --color-brand-accent-hover: #EA580C;
+  --color-brand-border: #E5E7EB;
+
+  @keyframes slide-in-top {
+    from { transform: translateY(-1rem); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  @keyframes scale-in-premium {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes glow-pulse {
+    0% { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.2)); }
+    50% { filter: drop-shadow(0 0 25px rgba(249, 115, 22, 0.5)); }
+    100% { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.2)); }
+  }
+}
+
+.animate-in {
+  animation-duration: 500ms;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fade-in { animation-name: fade-in; }
+.slide-in-from-right-8 { animation-name: slide-in-right; }
+.slide-in-from-top-4 { animation-name: slide-in-top; }
+.zoom-in { animation-name: zoom-slow; }
+.scale-in-premium { animation-name: scale-in-premium; }
+.glow-pulse { animation-name: glow-pulse; animation-iteration-count: infinite; animation-duration: 3s; }
+.duration-700 { animation-duration: 700ms; }
+.duration-1000 { animation-duration: 1000ms; }
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

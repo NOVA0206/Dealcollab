@@ -1,0 +1,87 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/auth';
+import { db } from '@/db';
+import { users, tokenTransactions } from '@/db/schema';
+import { eq, desc } from 'drizzle-orm';
+
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const userId = session.user.id;
+
+    // 1. Fetch current balance
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { tokens: true }
+    });
+
+    // 2. Fetch transaction history
+    const history = await db.query.tokenTransactions.findMany({
+      where: eq(tokenTransactions.userId, userId),
+      orderBy: [desc(tokenTransactions.createdAt)]
+    });
+
+    return NextResponse.json({
+      balance: user?.tokens || 0,
+      transactions: history
+    });
+  } catch (error) {
+    console.error('Token ledger fetch error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const userId = session.user.id;
+    const body = await req.json();
+    const { type, action, amount } = body;
+
+    if (!type || !action || typeof amount !== 'number') {
+      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+    }
+
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+    let finalTokens = user.tokens || 0;
+    
+    if (type === 'debit') {
+      if (finalTokens < amount) {
+        return NextResponse.json({ error: 'Insufficient tokens' }, { status: 400 });
+      }
+      finalTokens -= amount;
+    } else {
+      finalTokens += amount;
+    }
+
+    // Atomic update (not strictly atomic here, but okay for this app)
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ tokens: finalTokens }).where(eq(users.id, userId));
+      await tx.insert(tokenTransactions).values({
+        userId,
+        type,
+        action,
+        amount: type === 'debit' ? -amount : amount,
+        balanceAfter: finalTokens,
+      });
+    });
+
+    return NextResponse.json({ success: true, balance: finalTokens });
+  } catch (error) {
+    console.error('Token transaction error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
