@@ -33,7 +33,7 @@ export async function generateAIResponse(messages: ChatMessage[]) {
       const groq = new Groq({ apiKey: groqApiKey });
       
       const response = await groq.chat.completions.create({
-        model: process.env.GROQ_MODEL || "llama3-70b-8192",
+        model: process.env.GROQ_MODEL || "llama3-8b-8192",
         messages,
         temperature: 0,
         stream: false,
