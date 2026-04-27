@@ -6,7 +6,12 @@ import { calculateProgress, validateFullProfile, ProfileFormData } from '@/lib/v
 export async function GET() {
   const supabase = createServerSupabaseClient();
   if (!supabase) {
-    return NextResponse.json({ error: 'Database service unavailable' }, { status: 503 });
+    console.error('[PROFILE GET] Supabase init failed:', {
+      hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    });
+    return NextResponse.json({ error: 'Database not configured. Check Vercel environment variables.' }, { status: 503 });
   }
   const session = await auth();
   
@@ -87,7 +92,12 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const supabase = createServerSupabaseClient();
   if (!supabase) {
-    return NextResponse.json({ error: 'Database service unavailable' }, { status: 503 });
+    console.error('[PROFILE POST] Supabase init failed:', {
+      hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    });
+    return NextResponse.json({ error: 'Database not configured. Check Vercel environment variables.' }, { status: 503 });
   }
   const session = await auth();
 

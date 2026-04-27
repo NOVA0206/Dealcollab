@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { createServerSupabaseClient } from '@/utils/supabase/server';
+import { createServerSupabaseClient, getServerKeyType } from '@/utils/supabase/server';
 
 const ACCEPTED_TYPES = [
   'application/pdf',
@@ -10,11 +10,9 @@ const ACCEPTED_TYPES = [
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ];
 
-// Some browsers set MIME type as empty string or octet-stream for .doc/.docx/.ppt/.pptx
-// We also validate by file extension as a fallback
 const ACCEPTED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx'];
-
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+const BUCKET_NAME = 'profile-attachments';
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -22,15 +20,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  try {
-    const supabase = createServerSupabaseClient();
-    if (!supabase) {
-      return NextResponse.json(
-        { field: 'file', message: 'Storage service unavailable. Please contact support.' },
-        { status: 503 }
-      );
-    }
+  const supabase = createServerSupabaseClient();
+  if (!supabase) {
+    console.error('[UPLOAD] Supabase client could not be initialized. Check env vars:', {
+      hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    });
+    return NextResponse.json(
+      { field: 'file', message: 'Upload service is not configured. Missing Supabase environment variables.' },
+      { status: 503 }
+    );
+  }
 
+  try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
 
@@ -38,14 +41,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ field: 'file', message: 'No file provided' }, { status: 400 });
     }
 
-    // Validate by MIME type OR extension (some browsers don't report correct MIME types)
+    // Validate by MIME type OR file extension (browsers can report incorrect MIME types)
     const ext = '.' + (file.name.split('.').pop()?.toLowerCase() || '');
-    const mimeOk = ACCEPTED_TYPES.includes(file.type);
-    const extOk = ACCEPTED_EXTENSIONS.includes(ext);
+    const isValidType = ACCEPTED_TYPES.includes(file.type) || ACCEPTED_EXTENSIONS.includes(ext);
 
-    if (!mimeOk && !extOk) {
+    if (!isValidType) {
       return NextResponse.json(
-        { field: 'file', message: `Only PDF, DOC, DOCX, PPT, PPTX files are accepted. Got type: ${file.type}, ext: ${ext}` },
+        { field: 'file', message: `Only PDF, DOC, DOCX, PPT, PPTX files are accepted. (Received: ${file.type || 'unknown'})` },
         { status: 400 }
       );
     }
@@ -54,7 +56,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ field: 'file', message: 'File must be under 10MB' }, { status: 400 });
     }
 
-    // Use email-based folder path (sanitized) since session.user.id may not match Supabase user id
+    // Ensure bucket exists (auto-create with service role key)
+    const keyType = getServerKeyType();
+    if (keyType === 'service_role') {
+      try {
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const exists = buckets?.some(b => b.name === BUCKET_NAME);
+        if (!exists) {
+          console.log(`[UPLOAD] Creating bucket '${BUCKET_NAME}'...`);
+          await supabase.storage.createBucket(BUCKET_NAME, {
+            public: true,
+            fileSizeLimit: MAX_SIZE,
+            allowedMimeTypes: ACCEPTED_TYPES,
+          });
+        }
+      } catch (bucketErr) {
+        console.warn('[UPLOAD] Bucket check/create failed (may already exist):', bucketErr);
+      }
+    }
+
+    // Build file path
     const email = session.user.email.trim().toLowerCase();
     const safeFolder = email.replace(/[^a-z0-9]/g, '_');
     const cleanExt = ext.replace('.', '');
@@ -62,51 +83,49 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Ensure the bucket exists
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const bucketExists = buckets?.some(b => b.name === 'profile-attachments');
-    
-    if (!bucketExists) {
-      const { error: bucketError } = await supabase.storage.createBucket('profile-attachments', {
-        public: true,
-        fileSizeLimit: MAX_SIZE,
-        allowedMimeTypes: ACCEPTED_TYPES,
-      });
-      if (bucketError) {
-        console.error('Bucket creation error:', bucketError);
-        // Continue anyway — bucket might exist with different permissions
-      }
-    }
-
+    // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
-      .from('profile-attachments')
+      .from(BUCKET_NAME)
       .upload(fileName, buffer, {
         contentType: file.type || 'application/octet-stream',
         upsert: true,
       });
 
     if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return NextResponse.json(
-        { field: 'file', message: 'Upload failed: ' + uploadError.message },
-        { status: 500 }
-      );
+      console.error('[UPLOAD] Storage upload failed:', {
+        error: uploadError,
+        bucket: BUCKET_NAME,
+        keyType,
+        fileName,
+      });
+
+      // Provide actionable error message
+      let userMessage = 'Upload failed: ' + uploadError.message;
+      if (uploadError.message.includes('Bucket not found')) {
+        userMessage = 'Storage bucket not configured. Please create a public bucket named "profile-attachments" in your Supabase dashboard (Storage → New Bucket).';
+      } else if (uploadError.message.includes('security') || uploadError.message.includes('policy')) {
+        userMessage = 'Storage permission denied. Please add a public upload policy to your "profile-attachments" bucket.';
+      }
+
+      return NextResponse.json({ field: 'file', message: userMessage }, { status: 500 });
     }
 
+    // Get public URL
     const { data: urlData } = supabase.storage
-      .from('profile-attachments')
+      .from(BUCKET_NAME)
       .getPublicUrl(fileName);
 
-    // Save URL to user profile immediately
+    // Persist URL to user profile
     const { error: updateError } = await supabase
       .from('users')
       .update({ profile_attachment_url: urlData.publicUrl })
       .ilike('email', email);
 
     if (updateError) {
-      console.error('Profile URL update error:', updateError);
-      // Don't fail — the file is uploaded, URL just didn't save to DB
+      console.error('[UPLOAD] Failed to save URL to profile:', updateError);
     }
+
+    console.log('[UPLOAD] Success:', { fileName, url: urlData.publicUrl, keyType });
 
     return NextResponse.json({
       success: true,
@@ -114,7 +133,8 @@ export async function POST(req: NextRequest) {
       fileName: file.name,
     });
   } catch (error) {
-    console.error('File upload error:', error);
-    return NextResponse.json({ field: 'file', message: 'Internal server error' }, { status: 500 });
+    console.error('[UPLOAD] Unhandled error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown upload error';
+    return NextResponse.json({ field: 'file', message: `Upload failed: ${message}` }, { status: 500 });
   }
 }

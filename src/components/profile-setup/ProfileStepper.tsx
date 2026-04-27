@@ -119,20 +119,27 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
   const handleFinalSubmit = async () => {
     setIsSubmitting(true);
     try {
-      // 1. Handle File Upload if present
+      // 1. Handle File Upload if present (Direct to Supabase via Signed URL)
       let attachmentUrl = formData.attachmentUrl;
       if (formData.attachmentFile) {
-        const uploadData = new FormData();
-        uploadData.append('file', formData.attachmentFile);
-        const uploadRes = await fetch('/api/profile/upload', {
-          method: 'POST',
-          body: uploadData,
+        // A. Get Signed URL from our backend
+        const signedRes = await fetch(`/api/profile/upload/signed-url?file=${encodeURIComponent(formData.attachmentFile.name)}&type=${encodeURIComponent(formData.attachmentFile.type)}`);
+        const { uploadUrl, path, error: signedError } = await signedRes.json();
+        
+        if (!signedRes.ok) throw new Error(signedError || 'Failed to get upload permission');
+
+        // B. Upload directly to Supabase (Bypasses Vercel 4.5MB limit)
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: formData.attachmentFile,
+          headers: { 'Content-Type': formData.attachmentFile.type }
         });
-        const uploadResult = await uploadRes.json();
-        if (!uploadRes.ok) {
-          throw new Error(uploadResult.message || 'File upload failed');
-        }
-        attachmentUrl = uploadResult.url;
+
+        if (!uploadRes.ok) throw new Error('Direct upload to storage failed');
+
+        // C. Get the public URL
+        const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/profile-attachments/${path}`;
+        attachmentUrl = publicUrl;
       }
 
       // 2. Submit Profile Data (strip non-serializable File object)
