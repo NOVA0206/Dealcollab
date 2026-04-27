@@ -2,14 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { db } from '@/db';
 import { chatSessions, chatMessages, mandates, deals } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, count } from 'drizzle-orm';
 import { 
   processDealIntake, 
   DealData, 
-  getMissingFields, 
-  generateQuestions,
-  REQUIRED_FIELDS,
-  isMissing
+  getMissingFields,
+  mergeData
 } from '@/lib/ai/deal-engine';
 
 function normalizeArrays(data: DealData) {
@@ -86,109 +84,113 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Save User Message
+    // 2. Turn Count for Context
+    const messageStats = await db.select({ value: count() })
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, activeChatId));
+    
+    const turnCount = messageStats[0]?.value || 0;
+
+    // 3. Save User Message
     await db.insert(chatMessages).values({
       chatId: activeChatId,
       role: 'user',
       content: message,
     });
 
-    // 3. Process with AI Engine
-    // ALWAYS load previous data from session
-    const previousData = (currentSession.sessionData as Partial<DealData>) || {};
-    const engineResponse = await processDealIntake(message, previousData);
+    // 4. STEP 1 — EXTRACT DATA FROM LLM
+    const previousState = (currentSession.sessionData as Partial<DealData>) || {};
+    const extraction = await processDealIntake(message, previousState, turnCount);
 
-    const mergedData = engineResponse.data;
+    // 5. STEP 2 — MERGE STATE (Backend Responsibility)
+    const mergedData = mergeData(previousState, extraction.data);
 
-    // 🚨 STEP 7 — PREVENT RE-ASK (Compute missing on MERGED data)
-    const missingFields = REQUIRED_FIELDS.filter(field => isMissing(mergedData[field as keyof DealData]));
-    
-    // 🚨 DEBUG LOGS (As requested)
-    // "Extracted" is already logged inside deal-engine.ts, but we keep the flow clear here
-    console.log("Merged:", mergedData);
-    console.log("Missing:", missingFields);
+    // 6. STEP 3 — VALIDATE MISSING FIELDS (CRITICAL BACKEND LOGIC)
+    const missingFields = getMissingFields(mergedData);
+    console.log("BACKEND VALIDATION - Missing:", missingFields);
 
-    // 4. Update Session Memory (CRITICAL: PERSIST BACK TO DB)
+    // 7. PERSIST MERGED STATE
     await db.update(chatSessions)
       .set({ sessionData: mergedData })
       .where(eq(chatSessions.id, activeChatId));
 
+    // 8. STEP 4 & 5 — COMPLETION CHECK
     if (missingFields.length > 0) {
-      console.log("❌ BLOCKING INSERT — Missing:", missingFields);
+      const responseMessage = extraction.message;
 
-      const questions = generateQuestions(missingFields).slice(0, 3);
-      const responseContent = questions.join(' ');
-
-      // Save Assistant Response to History
       await db.insert(chatMessages).values({
         chatId: activeChatId,
         role: 'assistant',
-        content: responseContent,
+        content: responseMessage,
       });
 
       return NextResponse.json({
         type: "clarification",
+        message: responseMessage,
+        content: responseMessage,
+        chatId: activeChatId,
         missing_fields: missingFields,
-        questions: questions,
-        content: responseContent,
-        chatId: activeChatId
+        data: mergedData
       });
     }
 
-    // 5. DB INSERT (ONLY IF COMPLETE)
-    console.log("✅ Data complete. Inserting...");
-    
-    // Normalize Arrays before Insert
-    const cleanedData = normalizeArrays(mergedData);
-    console.log("FINAL INSERT DATA:", cleanedData);
+    // 9. STEP 6 — DATABASE INSERT (ONLY WHEN READY)
+    try {
+      console.log("✅ ALL FIELDS PRESENT. PERMANENT STORAGE INITIATED...");
+      const cleanedData = normalizeArrays(mergedData);
 
-    // A. Insert into mandates
-    await db.insert(mandates).values({
-      userId: session.user.id,
-      rawText: message,
-      normalisedText: JSON.stringify(cleanedData),
-      intent: cleanedData.intent,
-      sectors: cleanedData.sectors,
-      geographies: cleanedData.geographies,
-      dealSizeMinCr: cleanedData.deal_size_min_cr?.toString() || null,
-      dealSizeMaxCr: cleanedData.deal_size_max_cr?.toString() || null,
-      revenueMinCr: cleanedData.revenue_min_cr?.toString() || null,
-      revenueMaxCr: cleanedData.revenue_max_cr?.toString() || null,
-      dealStructure: cleanedData.deal_structure,
-      specialConditions: cleanedData.special_conditions,
-      fraudFlags: cleanedData.fraud_flags,
-      urgency: cleanedData.inferred_urgency,
-      buyerType: cleanedData.inferred_buyer_type,
-      status: 'ACTIVE',
-      source: 'WEB',
-    });
+      // A. Insert into mandates
+      await db.insert(mandates).values({
+        userId: session.user.id,
+        rawText: message,
+        normalisedText: JSON.stringify(cleanedData),
+        intent: cleanedData.intent,
+        sectors: cleanedData.sectors,
+        geographies: cleanedData.geographies,
+        dealSizeMinCr: cleanedData.deal_size_min_cr?.toString() || null,
+        dealSizeMaxCr: cleanedData.deal_size_max_cr?.toString() || null,
+        revenueMinCr: cleanedData.revenue_min_cr?.toString() || null,
+        revenueMaxCr: cleanedData.revenue_max_cr?.toString() || null,
+        dealStructure: cleanedData.deal_structure,
+        specialConditions: cleanedData.special_conditions,
+        status: 'ACTIVE',
+        source: 'WEB',
+      });
 
-    // B. Insert into deals
-    await db.insert(deals).values({
-      userId: session.user.id,
-      title: `${cleanedData.intent}: ${cleanedData.sectors[0]} in ${cleanedData.geographies[0]}`,
-      sector: cleanedData.sectors[0],
-      region: cleanedData.geographies[0],
-      size: cleanedData.deal_size_min_cr ? `${cleanedData.deal_size_min_cr} Cr` : 'TBD',
-      status: 'live',
-    });
+      // B. Insert into deals
+      await db.insert(deals).values({
+        userId: session.user.id,
+        title: `${cleanedData.intent}: ${cleanedData.sectors[0]} in ${cleanedData.geographies[0]}`,
+        sector: cleanedData.sectors[0],
+        region: cleanedData.geographies[0],
+        size: cleanedData.deal_size_min_cr ? `${cleanedData.deal_size_min_cr} Cr` : 'TBD',
+        status: 'live',
+      });
 
-    const successMessage = "✅ Deal recorded successfully. All 11 data points captured.";
+      // 10. STEP 7 — FINAL SUCCESS RESPONSE
+      const successMessage = "✅ Message recorded. You'll get matched opportunities soon.";
 
-    // Save Assistant Response to History
-    await db.insert(chatMessages).values({
-      chatId: activeChatId,
-      role: 'assistant',
-      content: successMessage,
-    });
+      await db.insert(chatMessages).values({
+        chatId: activeChatId,
+        role: 'assistant',
+        content: successMessage,
+      });
 
-    return NextResponse.json({
-      type: "success",
-      message: successMessage,
-      content: successMessage,
-      chatId: activeChatId,
-      data: cleanedData
-    });
+      return NextResponse.json({
+        type: "complete",
+        message: successMessage,
+        content: successMessage,
+        chatId: activeChatId,
+        data: cleanedData
+      });
+
+    } catch (dbError) {
+      console.error("CRITICAL DB INSERT FAILURE:", dbError);
+      return NextResponse.json({ 
+        error: "Failed to save deal to database. Please try again.",
+        type: "error"
+      }, { status: 500 });
+    }
 
   } catch (error) {
     console.error('Chat processing error:', error);
