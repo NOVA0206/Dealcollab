@@ -19,20 +19,26 @@ export const users = pgTable('users', {
   profileCompletion: integer('profile_completion').default(0),
   tokens: integer('tokens').default(0),
   
-  // Professional Profile Fields (Extended)
+  // Professional Profile Fields (PRD-aligned)
   firmName: text('firm_name'),
   role: text('role'),
-  category: text('category').array(), // Postgres text array
+  customRole: text('custom_role'),
+  category: text('category').array(),
   customCategory: text('custom_category'),
   baseLocation: text('base_location'),
+  baseCity: text('base_city'),
+  baseCountry: text('base_country'),
   geographies: text('geographies').array(),
   crossBorder: boolean('cross_border').default(false),
-  corridors: text('corridors'),
+  corridors: text('corridors').array(),
   sectors: text('sectors').array(),
-  intent: text('intent'),
+  intent: text('intent').array(),
+  expertiseDescription: text('expertise_description'),
+  activeMandates: text('active_mandates').array(),
   prioritySectors: text('priority_sectors').array(),
   coAdvisory: boolean('co_advisory').default(false),
   collaborationModel: text('collaboration_model').array(),
+  profileAttachmentUrl: text('profile_attachment_url'),
   additionalInfo: text('additional_info'),
   
   

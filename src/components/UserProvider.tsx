@@ -14,26 +14,40 @@ export interface UserProfile {
   tokens: number;
   firm_name: string | null;
   role: string | null;
+  custom_role: string | null;
   category: string[] | null;
   custom_category: string | null;
   base_location: string | null;
+  base_city: string | null;
+  base_country: string | null;
   geographies: string[] | null;
   cross_border: boolean;
-  corridors: string | null;
+  corridors: string[] | null;
   sectors: string[] | null;
-  intent: string | null;
+  intent: string[] | null;
+  expertise_description: string | null;
+  active_mandates: string[] | null;
   priority_sectors: string[] | null;
   co_advisory: boolean;
   collaboration_model: string[] | null;
+  profile_attachment_url: string | null;
   additional_info: string | null;
   // Mapped/Alias fields used in frontend
   fullName?: string | null;
   firmName?: string | null;
+  customRole?: string | null;
   customCategory?: string | null;
   baseLocation?: string | null;
+  baseCity?: string | null;
+  baseCountry?: string | null;
   crossBorder?: boolean;
+  expertiseDescription?: string | null;
+  activeMandates?: string[] | null;
+  profileAttachmentUrl?: string | null;
   additionalInfo?: string | null;
   profileCompletion?: number;
+  coAdvisory?: boolean | null;
+  collaborationModels?: string[] | null;
 }
 
 interface UserContextType {
@@ -100,6 +114,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // Sync with Supabase (REAL DATA)
   useEffect(() => {
     async function fetchSupabaseData() {
+      if (!supabase) {
+        setGlobalError("Supabase configuration is missing. Please check your .env file.");
+        return;
+      }
       const userEmail = session?.user?.email?.trim().toLowerCase();
       if (!userEmail) return;
 
@@ -124,9 +142,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           ...data,
           fullName: data.name,
           firmName: data.firm_name,
+          customRole: data.custom_role,
           customCategory: data.custom_category,
           baseLocation: data.base_location,
+          baseCity: data.base_city,
+          baseCountry: data.base_country,
           crossBorder: data.cross_border,
+          expertiseDescription: data.expertise_description,
+          activeMandates: data.active_mandates,
+          profileAttachmentUrl: data.profile_attachment_url,
           additionalInfo: data.additional_info,
           profileCompletion: data.profile_completion,
         });
@@ -264,6 +288,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       globalError,
       setGlobalError
     }}>
+      {globalError && (
+        <div className="fixed top-0 left-0 w-full bg-red-600 text-white py-3 px-6 text-center z-[9999] font-bold shadow-lg flex items-center justify-center gap-3">
+          <span className="text-lg">⚠️</span>
+          {globalError}
+          <button 
+            onClick={() => window.location.reload()}
+            className="ml-4 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {children}
     </UserContext.Provider>
   );

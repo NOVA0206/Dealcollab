@@ -1,13 +1,14 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Loader2, Settings as SettingsIcon, ChevronLeft } from 'lucide-react';
-import ProfileStepper, { ProfileData } from '@/components/profile-setup/ProfileStepper';
+import ProfileStepper from '@/components/profile-setup/ProfileStepper';
+import { UserProfile } from '@/components/UserProvider';
 import ProfileSuccessScreen from '@/components/profile-setup/ProfileSuccessScreen';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 export default function ProfileSettingsPage() {
-   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+   const [profileData, setProfileData] = useState<UserProfile | null>(null);
    const [loading, setLoading] = useState(true);
    const [showSuccess, setShowSuccess] = useState(false);
    const router = useRouter();
@@ -77,7 +78,6 @@ export default function ProfileSettingsPage() {
 
             <ProfileStepper 
                onComplete={() => setShowSuccess(true)} 
-               onCancel={() => router.push('/profile')}
                initialData={profileData} 
             />
          </div>

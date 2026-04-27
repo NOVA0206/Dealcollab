@@ -2,13 +2,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@/components/UserProvider';
 import { Sparkles, Loader2 } from 'lucide-react';
-import ProfileStepper, { ProfileData } from '@/components/profile-setup/ProfileStepper';
+import ProfileStepper from '@/components/profile-setup/ProfileStepper';
+import { UserProfile } from '@/components/UserProvider';
 import ProfileView from '@/components/profile-setup/ProfileView';
 import ProfileSuccessScreen from '@/components/profile-setup/ProfileSuccessScreen';
 
 export default function ProfilePage() {
    const { onboarding } = useUser();
-   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+   const [profileData, setProfileData] = useState<UserProfile | null>(null);
    const [loading, setLoading] = useState(true);
    const [isEditing, setIsEditing] = useState(false);
    const [showSuccess, setShowSuccess] = useState(false);
@@ -87,7 +88,6 @@ export default function ProfilePage() {
                </div>
                <ProfileStepper 
                   onComplete={handleComplete} 
-                  onCancel={() => setIsEditing(false)}
                   initialData={profileData} 
                />
             </div>

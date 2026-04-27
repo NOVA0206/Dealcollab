@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseClient } from '@/utils/supabase/client';
+import { createServerSupabaseClient } from '@/utils/supabase/server';
 import { auth } from '@/auth';
+import { calculateProgress, validateFullProfile, ProfileFormData } from '@/lib/validation/profile';
 
 export async function GET() {
-  const supabase = createSupabaseClient();
+  const supabase = createServerSupabaseClient();
+  if (!supabase) {
+    return NextResponse.json({ error: 'Database service unavailable' }, { status: 503 });
+  }
   const session = await auth();
   
   if (!session?.user?.email) {
@@ -12,25 +16,21 @@ export async function GET() {
 
   try {
     const email = session.user.email.trim().toLowerCase();
-    console.log("SERVER: FETCHING PROFILE FOR EMAIL:", email);
 
-    // Fetch Profile from 'users' table using Normalized Email
-    let { data: profile, error: dbError } = await supabase
+    const { data: initialProfile, error: dbError } = await supabase
       .from("users")
       .select("*")
       .ilike("email", email)
       .maybeSingle();
 
+    let profile = initialProfile;
+
     if (dbError) {
-      console.error("SUPABASE ERROR:", dbError);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
 
-    // If User doesn't exist, Create them (Auto-provision)
     if (!profile) {
-      console.log("SERVER: USER NOT FOUND, CREATING NEW RECORD FOR:", email);
       const nameFallback = session.user.name || email.split("@")[0];
-      
       const { data: newProfile, error: insertError } = await supabase
         .from("users")
         .insert({
@@ -43,36 +43,40 @@ export async function GET() {
         .single();
 
       if (insertError) {
-        console.error("USER CREATION ERROR:", insertError);
         return NextResponse.json({ error: "Failed to create user profile" }, { status: 500 });
       }
       profile = newProfile;
     }
 
-    // Map DB (snake_case) to Frontend (camelCase) to ensure UI reflects ALL data
+    // Map DB (snake_case) to Frontend (camelCase)
     const profileData = {
       id: profile.id,
-      fullName: profile.name || session.user.name || email.split("@")[0],
+      fullName: profile.name,
       email: profile.email,
       phone: profile.phone,
       firmName: profile.firm_name,
       role: profile.role,
+      customRole: profile.custom_role,
       category: profile.category || [],
       customCategory: profile.custom_category,
+      baseCity: profile.base_city,
+      baseCountry: profile.base_country,
       baseLocation: profile.base_location,
       geographies: profile.geographies || [],
       crossBorder: profile.cross_border === true,
-      corridors: profile.corridors || "",
+      corridors: profile.corridors || [],
       sectors: profile.sectors || [],
-      intent: profile.intent || "",
+      currentFocus: profile.intent || [],
+      expertiseDescription: profile.expertise_description,
+      activeMandates: profile.active_mandates || [],
       prioritySectors: profile.priority_sectors || [],
       coAdvisory: profile.co_advisory === true,
-      collaborationModel: profile.collaboration_model || [],
+      collaborationModels: profile.collaboration_model || [],
+      profileAttachmentUrl: profile.profile_attachment_url,
       additionalInfo: profile.additional_info,
       profileCompletion: profile.profile_completion || 0,
     };
 
-    console.log("SERVER: MAPPED PROFILE DATA:", profileData.fullName, profileData.profileCompletion);
     return NextResponse.json(profileData);
   } catch (error) {
     console.error('Profile fetch error:', error);
@@ -81,7 +85,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createSupabaseClient();
+  const supabase = createServerSupabaseClient();
+  if (!supabase) {
+    return NextResponse.json({ error: 'Database service unavailable' }, { status: 503 });
+  }
   const session = await auth();
 
   if (!session?.user?.email) {
@@ -89,8 +96,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
+    const body = await req.json() as ProfileFormData;
     const email = session.user.email.trim().toLowerCase();
+
+    // 1. Validate Input (Using PRD rules)
+    const errors = validateFullProfile(body);
+    if (errors.length > 0) {
+      return NextResponse.json({ errors }, { status: 400 });
+    }
 
     // Fetch current user state
     const { data: currentUser, error: fetchError } = await supabase
@@ -103,24 +116,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Dynamic Progress Calculation
-    const fieldsToTrack = [
-      body.fullName,
-      body.workEmail || body.email,
-      body.phone,
-      body.firmName,
-      body.role,
-      body.professionalCategory?.length > 0 || body.category?.length > 0,
-      body.baseLocation,
-      body.activeGeographies?.length > 0 || body.geographies?.length > 0,
-      body.primarySectors?.length > 0 || body.sectors?.length > 0,
-      body.selectedDeals?.length > 0 || body.intent?.length > 0,
-      body.prioritySectors?.length > 0,
-      body.collaborationModels?.length > 0 || body.collaborationModel?.length > 0,
-      body.intelligenceLayer?.length > 10 || body.additionalInfo?.length > 10,
-    ];
-    const filledCount = fieldsToTrack.filter(f => f).length;
-    const progress = Math.round((filledCount / fieldsToTrack.length) * 100);
+    // 2. Dynamic Progress Calculation
+    const progress = calculateProgress(body);
 
     let tokenIncrement = 0;
     let shouldShowSuccess = false;
@@ -133,30 +130,37 @@ export async function POST(req: NextRequest) {
 
     const finalTokens = (currentUser.tokens || 0) + tokenIncrement;
 
+    // 3. Normalize & Map Data to DB
     const updateData = {
-      name: body.fullName || currentUser.name,
-      email: body.workEmail || body.email || currentUser.email,
-      phone: body.phone || currentUser.phone,
-      firm_name: body.firmName || currentUser.firm_name,
-      role: body.role || currentUser.role,
-      category: body.professionalCategory || body.category || currentUser.category,
-      custom_category: body.customCategory || currentUser.custom_category,
-      base_location: body.baseLocation || currentUser.base_location,
-      geographies: body.activeGeographies || body.geographies || currentUser.geographies,
-      cross_border: body.crossBorder ?? currentUser.cross_border,
-      corridors: Array.isArray(body.corridors) ? body.corridors.join(', ') : body.corridors || currentUser.corridors,
-      sectors: body.primarySectors || body.sectors || currentUser.sectors,
-      intent: Array.isArray(body.selectedDeals) ? body.selectedDeals.join(', ') : body.intent || currentUser.intent,
-      priority_sectors: body.prioritySectors || currentUser.priority_sectors,
-      co_advisory: body.coAdvisory ?? currentUser.co_advisory,
-      collaboration_model: body.collaborationModels || body.collaborationModel || currentUser.collaboration_model,
-      additional_info: body.intelligenceLayer || body.additionalInfo || currentUser.additional_info,
+      name: body.fullName,
+      email: body.workEmail || email,
+      phone: body.phone,
+      firm_name: body.firmName,
+      role: body.role,
+      custom_role: body.customRole,
+      category: body.professionalCategory,
+      custom_category: body.customCategory,
+      base_city: body.baseCity,
+      base_country: body.baseCountry,
+      base_location: `${body.baseCity}, ${body.baseCountry}`,
+      geographies: body.activeGeographies,
+      cross_border: body.crossBorder,
+      corridors: body.corridors,
+      sectors: body.primarySectors,
+      intent: body.currentFocus,
+      expertise_description: body.expertiseDescription,
+      active_mandates: body.activeMandates,
+      priority_sectors: body.primarySectors, // Using primary sectors as priority for now
+      co_advisory: body.coAdvisory,
+      collaboration_model: body.collaborationModels,
+      profile_attachment_url: body.attachmentUrl || currentUser.profile_attachment_url,
+      additional_info: body.additionalInfo,
       profile_completion: progress,
       profile_completed_once: currentUser.profile_completed_once || (progress === 100),
       tokens: finalTokens,
     };
 
-    // Update User
+    // 4. Store in DB
     const { error: updateError } = await supabase
       .from("users")
       .update(updateData)
@@ -169,7 +173,7 @@ export async function POST(req: NextRequest) {
       await supabase
         .from("token_transactions")
         .insert({
-          userId: currentUser.id,
+          user_id: currentUser.id,
           type: 'credit',
           action: 'Profile Completion Reward',
           amount: tokenIncrement,
@@ -188,3 +192,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+
