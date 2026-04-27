@@ -17,15 +17,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isStandalonePage = pathname?.includes('/eoi-review');
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-white font-sans antialiased text-foreground">
+    <div className="flex flex-col md:flex-row h-screen bg-white font-sans antialiased text-foreground overflow-hidden">
       {/* Desktop Sidebar */}
       {!isStandalonePage && (
-        <div className={`hidden md:block ${isSidebarCollapsed ? 'w-[80px]' : 'w-[240px]'} transition-all duration-300 overflow-hidden shrink-0 relative z-[60]`}>
+        <div className={`hidden md:block ${isSidebarCollapsed ? 'w-[80px]' : 'w-[240px]'} h-full transition-all duration-300 overflow-hidden shrink-0 relative z-[60]`}>
             <Sidebar isCollapsed={isSidebarCollapsed} onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)} />
         </div>
       )}
       
-      <div className="flex-1 flex flex-col relative min-h-screen bg-white">
+      <div className="flex-1 flex flex-col relative h-full bg-white overflow-hidden">
         {/* Mobile Bottom Nav */}
         {!isStandalonePage && <BottomNav />}
 
@@ -44,7 +44,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
         
         {/* Main Content Area */}
-        <main className="flex-1 flex flex-col w-full min-h-screen relative pb-32 md:pb-0">
+        <main className="flex-1 flex flex-col w-full h-full relative overflow-hidden">
           {children}
         </main>
       </div>

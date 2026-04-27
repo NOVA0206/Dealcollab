@@ -1,97 +1,77 @@
 'use client';
-import React, { useEffect, useRef } from 'react';
-import { Sparkles, FileText, User } from 'lucide-react';
+import React from 'react';
+import { Sparkles, User, MessageCircle } from 'lucide-react';
 
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
   id: string;
+  type?: 'clarification' | 'deal_ready' | 'deal_saved';
+  questions?: string[];
 }
 
 interface ChatAreaProps {
   messages: Message[];
   userName?: string | null;
+  onQuestionClick?: (question: string) => void;
 }
 
-export default function ChatArea({ messages, userName }: ChatAreaProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const isFirstRender = useRef(true);
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    if (messages.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
-
+export default function ChatArea({ messages, onQuestionClick }: ChatAreaProps) {
   return (
-    <div className="flex-1 flex flex-col h-full w-full max-w-4xl mx-auto">
-      <div className="w-full flex-1 overflow-y-auto scrollbar-hide space-y-8 pb-8">
-        {messages.length === 0 ? (
-          /* Welcome Section */
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-brand-accent/10 flex items-center justify-center mb-6 border border-brand-accent/20">
-              <Sparkles size={32} className="text-brand-accent" />
+    <div className="space-y-8 max-w-3xl mx-auto">
+      {messages.map((msg) => (
+        <div key={msg.id} className={`flex items-start gap-4 w-full ${msg.role === 'user' ? 'justify-end' : ''}`}>
+          {msg.role === 'assistant' && (
+            <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center shrink-0 shadow-sm mt-1">
+              <Sparkles size={16} className="text-orange-500" />
             </div>
-            <h2 className="text-2xl font-bold text-foreground mb-2">
-              Welcome{userName ? `, ${userName}` : ''} to DealCollab AI
-            </h2>
-            <p className="text-brand-secondary text-[16px] max-w-md font-medium leading-relaxed">
-              I'm your intelligent assistant for analyzing deals, reviewing proposals, and gathering insights. 
-              How can I help you today?
-            </p>
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <div key={msg.id} className={`flex items-start gap-4 w-full ${msg.role === 'user' ? 'justify-end' : ''}`}>
-              {msg.role === 'assistant' && (
-                <div className="w-8 h-8 rounded-lg bg-brand-accent flex items-center justify-center shrink-0 shadow-sm mt-1">
-                  <Sparkles size={14} className="text-white" />
-                </div>
-              )}
-              
-              <div 
-                className={`max-w-[85%] p-5 rounded-2xl shadow-sm border border-brand-border ${
-                  msg.role === 'user' 
-                    ? 'bg-brand-sidebar rounded-tr-sm text-foreground' 
-                    : 'bg-brand-card rounded-tl-sm text-foreground'
-                }`}
-              >
-                {msg.role === 'assistant' && (
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-bold text-brand-accent uppercase tracking-wider">AI Insight</span>
-                    </div>
-                )}
-                <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-                
-                {msg.role === 'assistant' && msg.content.includes('Acme') && (
-                  <div className="bg-white border border-brand-border rounded-lg p-4 mt-4 shadow-sm">
-                    <div className="flex items-center gap-3 mb-2">
-                      <FileText size={16} className="text-brand-accent" />
-                      <span className="text-foreground text-sm font-bold">Acme_Proposal_Analysis.pdf</span>
-                    </div>
-                    <ul className="list-disc list-inside text-brand-secondary text-sm space-y-1 font-medium">
-                      <li>Pricing discrepancy found in Section 4.</li>
-                      <li>SLA requirements not fully met.</li>
-                    </ul>
-                  </div>
-                )}
+          )}
+          
+          <div 
+            className={`max-w-[85%] px-4 py-3 rounded-2xl ${
+              msg.role === 'user' 
+                ? 'bg-orange-500 text-white rounded-tr-sm shadow-md' 
+                : 'bg-gray-100 text-foreground rounded-tl-sm'
+            }`}
+          >
+            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+            
+            {msg.role === 'assistant' && msg.type === 'deal_saved' && (
+              <div className="mt-4 p-3 bg-white rounded-xl border border-green-100 flex items-center gap-3 text-green-700 font-medium animate-in zoom-in shadow-sm">
+                <Sparkles size={16} className="text-green-500" />
+                <span>Your deal has been recorded and is now live.</span>
               </div>
+            )}
 
-              {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-lg bg-gray-200 flex items-center justify-center border border-brand-border shrink-0 mt-1">
-                  <User size={16} className="text-brand-secondary" />
+            {msg.role === 'assistant' && msg.type === 'clarification' && msg.questions && (
+              <div className="mt-6 space-y-4 animate-in slide-in-from-top-2 duration-500 bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+                <div className="flex items-center gap-2 mb-1">
+                  <MessageCircle size={14} className="text-orange-500" />
+                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">💬 Tell Us More</span>
                 </div>
-              )}
+                <div className="space-y-2">
+                  {msg.questions.map((q, idx) => (
+                    <button 
+                      key={idx}
+                      onClick={() => onQuestionClick?.(q)}
+                      className="w-full text-left px-4 h-11 rounded-lg border border-gray-200 bg-gray-50 hover:bg-white hover:border-orange-500 hover:text-orange-600 transition-all text-sm font-medium flex items-center justify-between group"
+                    >
+                      <span>{q}</span>
+                      <Sparkles size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-500" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {msg.role === 'user' && (
+            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0 mt-1 overflow-hidden">
+              <User size={18} className="text-gray-500" />
             </div>
-          ))
-        )}
-        <div ref={bottomRef} />
-      </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
-

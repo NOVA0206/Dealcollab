@@ -5,6 +5,7 @@ import { useUser } from '@/components/UserProvider';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import GlobalErrorBanner from '@/components/GlobalErrorBanner';
+import { ChatProvider } from '@/components/ChatProvider';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -38,9 +39,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <DashboardLayout>
-      <GlobalErrorBanner />
-      {children}
-    </DashboardLayout>
+    <ChatProvider>
+      <DashboardLayout>
+        <GlobalErrorBanner />
+        {children}
+      </DashboardLayout>
+    </ChatProvider>
   );
 }

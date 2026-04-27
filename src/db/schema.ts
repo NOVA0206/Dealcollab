@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb, pgEnum, index, boolean, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, jsonb, pgEnum, index, boolean, primaryKey, numeric } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
@@ -156,6 +156,47 @@ export const notifications = pgTable('notifications', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// 8. MANDATES
+export const mandates = pgTable('mandates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  rawText: text('raw_text').notNull(),
+  normalisedText: text('normalised_text'),
+  intent: text('intent'), // BUY_SIDE, SELL_SIDE, INVESTMENT
+  sectors: text('sectors').array(),
+  geographies: text('geographies').array(),
+  dealSizeMinCr: numeric('deal_size_min_cr'),
+  dealSizeMaxCr: numeric('deal_size_max_cr'),
+  revenueMinCr: numeric('revenue_min_cr'),
+  revenueMaxCr: numeric('revenue_max_cr'),
+  dealStructure: text('deal_structure'), // Asset, Share, Majority
+  specialConditions: text('special_conditions').array(),
+  fraudFlags: text('fraud_flags').array(),
+  urgency: text('urgency'), // Low, Medium, High
+  buyerType: text('buyer_type'), // Strategic, Financial
+  status: text('status').default('ACTIVE').notNull(),
+  source: text('source').default('WEB').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 9. CHAT SESSIONS
+export const chatSessions = pgTable('chat_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  title: text('title').default('New Deal Intake'),
+  sessionData: jsonb('session_data').default({}).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 10. CHAT MESSAGES
+export const chatMessages = pgTable('chat_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  chatId: uuid('chat_id').references(() => chatSessions.id, { onDelete: 'cascade' }).notNull(),
+  role: text('role').notNull(), // 'user', 'assistant'
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   accounts: many(accounts),
@@ -163,6 +204,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   deals: many(deals),
   tokenTransactions: many(tokenTransactions),
   notifications: many(notifications),
+  mandates: many(mandates),
+  chatSessions: many(chatSessions),
   sentEois: many(eois, { relationName: 'sender' }),
   receivedEois: many(eois, { relationName: 'receiver' }),
 }));
@@ -198,4 +241,17 @@ export const tokenTransactionsRelations = relations(tokenTransactions, ({ one })
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, { fields: [notifications.userId], references: [users.id] }),
+}));
+
+export const mandatesRelations = relations(mandates, ({ one }) => ({
+  user: one(users, { fields: [mandates.userId], references: [users.id] }),
+}));
+
+export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => ({
+  user: one(users, { fields: [chatSessions.userId], references: [users.id] }),
+  messages: many(chatMessages),
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  chat: one(chatSessions, { fields: [chatMessages.chatId], references: [chatSessions.id] }),
 }));
