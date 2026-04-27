@@ -45,11 +45,13 @@ export default function Home() {
 
       const data = await response.json();
 
-      if (!response.ok) throw new Error(data.error || 'Failed to process deal');
+      if (!response.ok || data.success === false) {
+        throw new Error(data.error || 'Failed to process deal');
+      }
 
       const aiMsg = {
         role: 'assistant' as const,
-        content: data.content || data.message,
+        content: data.message || data.content,
         id: (Date.now() + 1).toString(),
         type: data.type,
         questions: data.questions,
@@ -62,12 +64,14 @@ export default function Home() {
         setActiveChatId(data.chatId);
         fetchSessions();
       }
-    } catch (error) {
-      console.error('Deal processing error:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error('Deal processing error:', err);
       const aiMsg = {
         role: 'assistant' as const,
-        content: "I'm sorry, I encountered an error while processing your deal. Please try again.",
+        content: `❌ ERROR: ${err.message || 'Unknown error occurred'}`,
         id: (Date.now() + 2).toString(),
+        type: 'error' as const
       };
       setMessages(prev => [...prev, aiMsg]);
     }

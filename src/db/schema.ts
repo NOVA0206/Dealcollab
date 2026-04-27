@@ -184,7 +184,6 @@ export const chatSessions = pgTable('chat_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   title: text('title').default('New Deal Intake'),
-  sessionData: jsonb('session_data').default({}).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

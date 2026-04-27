@@ -34,8 +34,13 @@ export async function GET(
     });
 
     return NextResponse.json(messages);
-  } catch (error) {
-    console.error('Messages fetch error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Messages fetch error:', err);
+    return NextResponse.json({ 
+      success: false, 
+      error: err.message, 
+      stack: err.stack 
+    }, { status: 500 });
   }
 }

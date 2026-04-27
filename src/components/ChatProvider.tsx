@@ -6,7 +6,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   id: string;
-  type?: 'clarification' | 'deal_ready' | 'deal_saved';
+  type?: 'intro' | 'conversation' | 'clarification' | 'complete' | 'error' | 'deal_ready' | 'deal_saved';
   questions?: string[];
 }
 
@@ -42,10 +42,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const performFetch = useCallback(async () => {
     if (!session?.user?.id) return;
     try {
-      const res = await fetch('/api/chat');
+      const res = await fetch('/api/chat/history');
       const data = await res.json();
       if (Array.isArray(data)) {
         setSessions(data);
+      } else if (data.success === false) {
+        console.error('API Error:', data.error, data.stack);
       }
     } catch (err) {
       console.error('Failed to fetch sessions:', err);
@@ -64,10 +66,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const init = async () => {
       if (!session?.user?.id) return;
       try {
-        const res = await fetch('/api/chat');
+        const res = await fetch('/api/chat/history');
         const data = await res.json();
-        if (isMounted && Array.isArray(data)) {
-          setSessions(data);
+        if (isMounted) {
+          if (Array.isArray(data)) {
+            setSessions(data);
+          } else if (data.success === false) {
+             console.error('API Error on Init:', data.error, data.stack);
+          }
         }
       } catch (err) {
         console.error('Initial fetch failed:', err);
