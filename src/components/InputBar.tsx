@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useRef } from 'react';
-import { ArrowUp, Sparkles, Plus } from 'lucide-react';
+import { Plus, Send } from 'lucide-react';
 
 interface InputBarProps {
   onSendMessage: (text: string) => void;
@@ -36,8 +36,8 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
   };
 
   return (
-    <div className="w-full bg-white border-t border-gray-100 px-4 py-3 pb-8 md:pb-6">
-      <div className="max-w-3xl mx-auto flex items-center gap-3">
+    <div className="w-full bg-white pb-8 pt-2 px-4 md:px-6">
+      <div className="max-w-3xl mx-auto relative group">
         <input 
           type="file"
           ref={fileInputRef}
@@ -46,39 +46,38 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
           accept=".pdf,.doc,.docx,.txt,image/*"
         />
         
-        <button 
-          type="button"
-          onClick={handlePlusClick}
-          className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-orange-500 hover:bg-orange-50 transition-all active:scale-90"
-        >
-          <Plus size={20} />
-        </button>
-
-        <form 
-          onSubmit={handleSubmit}
-          className="flex-1 flex items-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-1.5 focus-within:border-orange-500 focus-within:bg-white transition-all shadow-sm"
-        >
-          <input 
-            type="text" 
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type your answer or describe your deal..." 
-            className="flex-1 bg-transparent border-none outline-none text-foreground text-[15px] py-1.5"
-          />
-          
+        <div className="flex items-center bg-white border border-gray-200 rounded-2xl shadow-lg shadow-gray-200/50 hover:shadow-xl hover:border-gray-300 transition-all focus-within:ring-2 focus-within:ring-orange-500/10 focus-within:border-orange-500 overflow-hidden">
           <button 
-            type="submit"
-            disabled={!inputValue.trim()}
-            className="w-8 h-8 rounded-lg bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center transition-all disabled:opacity-30 disabled:grayscale active:scale-90"
+            type="button"
+            onClick={handlePlusClick}
+            className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-gray-400 hover:text-orange-500 transition-colors"
           >
-            <ArrowUp size={18} />
+            <Plus size={22} />
           </button>
-        </form>
-      </div>
-      <div className="text-center mt-2 flex items-center justify-center gap-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wider">
-        <Sparkles size={10} className="text-orange-400" />
-        AI extraction active
+
+          <form onSubmit={handleSubmit} className="flex-1 flex items-center">
+            <input 
+              type="text" 
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask DealCollab AI anything..." 
+              className="flex-1 bg-transparent border-none outline-none text-foreground text-[16px] py-4 pr-4 placeholder:text-gray-400"
+            />
+            
+            <button 
+              type="submit"
+              disabled={!inputValue.trim()}
+              className="mr-3 w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale active:scale-95 shadow-md shadow-orange-500/20"
+            >
+              <Send size={18} />
+            </button>
+          </form>
+        </div>
+        
+        <p className="text-center text-[10px] text-gray-400 mt-3 font-medium uppercase tracking-[0.1em]">
+          Deal Intelligence Assistant • High Precision Extraction
+        </p>
       </div>
     </div>
   );

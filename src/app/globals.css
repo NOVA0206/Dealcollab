@@ -53,10 +53,29 @@ body {
   color: var(--foreground);
 }
 
+.input-underline {
+  border: none !important;
+  border-bottom: 2px solid #ff4d4f !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  transition: border-color 0.2s ease;
+}
+
+.input-underline:focus {
+  outline: none;
+  border-bottom-color: #ff6a00;
+}
+
 .scrollbar-hide {
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none; /* Firefox */
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+@layer utilities {
+  .chat-container-max {
+    @apply max-w-[700px] mx-auto w-full;
+  }
 }

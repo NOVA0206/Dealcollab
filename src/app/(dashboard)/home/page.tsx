@@ -77,7 +77,7 @@ export default function Home() {
     <div className="flex-1 flex flex-col h-full relative bg-white overflow-hidden">
       {/* Scrollable Message Area */}
       <div className="flex-1 overflow-y-auto bg-white">
-        <div className="max-w-4xl mx-auto w-full px-6 sm:px-10 py-10 pb-40">
+        <div className="chat-container-max px-6 py-10 pb-40">
           {loading ? (
             <div className="max-w-3xl mx-auto">
                 <ChatSkeleton />

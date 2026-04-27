@@ -2,9 +2,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useUser } from '../UserProvider';
 import { 
-  User, Mail, Phone, Building2, Globe, 
-  ChevronRight, ChevronLeft, Sparkles, Zap, 
-  MapPin
+  Globe, 
+  ChevronRight, ChevronLeft, Sparkles, Zap
 } from 'lucide-react';
 import { useSession } from 'next-auth/react';
 import { UserProfile } from '../UserProvider';
@@ -142,8 +141,9 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         attachmentUrl = publicUrl;
       }
 
-      // 2. Submit Profile Data (strip non-serializable File object)
-      const { attachmentFile, ...submitData } = formData;
+      const { attachmentFile: _unused, ...submitData } = formData;
+      void _unused;
+      
       const response = await fetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -242,30 +242,30 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
               <StepCard title="Basic Identity" helper="Establish your professional identity within the network">
                 <div className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <InputGroup label="Full Name" icon={<User size={16} />}>
-                      <input type="text" value={formData.fullName} onChange={e => updateFormData({ fullName: e.target.value })} className="input-premium pl-12" placeholder="Legal Name" />
+                    <InputGroup label="Full Name">
+                      <input type="text" value={formData.fullName} onChange={e => updateFormData({ fullName: e.target.value })} className="input-underline" placeholder="Legal Name" />
                     </InputGroup>
-                    <InputGroup label="Work Email" icon={<Mail size={16} />}>
-                      <input type="email" value={formData.workEmail} onChange={e => updateFormData({ workEmail: e.target.value })} className="input-premium pl-12" placeholder="name@firm.com" />
+                    <InputGroup label="Work Email">
+                      <input type="email" value={formData.workEmail} onChange={e => updateFormData({ workEmail: e.target.value })} className="input-underline" placeholder="name@firm.com" />
                     </InputGroup>
-                    <InputGroup label="Phone Number" icon={<Phone size={16} />}>
-                      <input type="tel" value={formData.phone} onChange={e => updateFormData({ phone: e.target.value })} className="input-premium pl-12" placeholder="+1 (555) 000-0000" />
+                    <InputGroup label="Phone Number">
+                      <input type="tel" value={formData.phone} onChange={e => updateFormData({ phone: e.target.value })} className="input-underline" placeholder="+1 (555) 000-0000" />
                     </InputGroup>
-                    <InputGroup label="Firm / Organization Name (Optional)" icon={<Building2 size={16} />}>
-                      <input type="text" value={formData.firmName} onChange={e => updateFormData({ firmName: e.target.value })} className="input-premium pl-12" placeholder="Company Name" />
+                    <InputGroup label="Firm / Organization Name (Optional)">
+                      <input type="text" value={formData.firmName} onChange={e => updateFormData({ firmName: e.target.value })} className="input-underline" placeholder="Company Name" />
                     </InputGroup>
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <InputGroup label="Your Role">
-                      <select value={formData.role} onChange={e => updateFormData({ role: e.target.value })} className="input-premium appearance-none cursor-pointer">
+                      <select value={formData.role} onChange={e => updateFormData({ role: e.target.value })} className="input-underline cursor-pointer">
                         <option value="">Select your role</option>
                         {ROLE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                       </select>
                     </InputGroup>
                     {formData.role === 'Other' && (
                       <InputGroup label="Specify Role">
-                        <input type="text" value={formData.customRole} onChange={e => updateFormData({ customRole: e.target.value })} className="input-premium" placeholder="Enter your role" />
+                        <input type="text" value={formData.customRole} onChange={e => updateFormData({ customRole: e.target.value })} className="input-underline" placeholder="Enter your role" />
                       </InputGroup>
                     )}
                   </div>
@@ -280,7 +280,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                     />
                     {formData.professionalCategory.includes("Other") && (
                       <InputGroup label="Specify Category">
-                        <input type="text" value={formData.customCategory} onChange={e => updateFormData({ customCategory: e.target.value })} className="input-premium" placeholder="Your specific professional title" />
+                        <input type="text" value={formData.customCategory} onChange={e => updateFormData({ customCategory: e.target.value })} className="input-underline" placeholder="Your specific professional title" />
                       </InputGroup>
                     )}
                   </div>
@@ -293,11 +293,11 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
               <StepCard title="Geography & Coverage" helper="Define your operational deal-making jurisdictions">
                 <div className="space-y-10">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <InputGroup label="City" icon={<MapPin size={16} />}>
-                      <input type="text" value={formData.baseCity} onChange={e => updateFormData({ baseCity: e.target.value })} className="input-premium pl-12" placeholder="e.g. Dubai" />
+                    <InputGroup label="City">
+                      <input type="text" value={formData.baseCity} onChange={e => updateFormData({ baseCity: e.target.value })} className="input-underline" placeholder="e.g. Dubai" />
                     </InputGroup>
-                    <InputGroup label="Country" icon={<Globe size={16} />}>
-                      <input type="text" value={formData.baseCountry} onChange={e => updateFormData({ baseCountry: e.target.value })} className="input-premium pl-12" placeholder="e.g. UAE" />
+                    <InputGroup label="Country">
+                      <input type="text" value={formData.baseCountry} onChange={e => updateFormData({ baseCountry: e.target.value })} className="input-underline" placeholder="e.g. UAE" />
                     </InputGroup>
                   </div>
 
@@ -340,7 +340,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                       />
                       {formData.corridors.includes('Other') && (
                         <InputGroup label="Specify Corridor">
-                          <input type="text" value={formData.customCorridor} onChange={e => updateFormData({ customCorridor: e.target.value })} className="input-premium" placeholder="e.g. India ↔ Germany" />
+                          <input type="text" value={formData.customCorridor} onChange={e => updateFormData({ customCorridor: e.target.value })} className="input-underline" placeholder="e.g. India ↔ Germany" />
                         </InputGroup>
                       )}
                     </div>
@@ -380,7 +380,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                       value={formData.expertiseDescription} 
                       onChange={e => updateFormData({ expertiseDescription: e.target.value })} 
                       rows={6} 
-                      className="input-premium pt-12 resize-none" 
+                      className="input-underline pt-8 resize-none" 
                       placeholder="Minimum 60 characters..." 
                     />
                     <div className="flex justify-between mt-1 px-1">
@@ -460,7 +460,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                     value={formData.additionalInfo} 
                     onChange={e => updateFormData({ additionalInfo: e.target.value })} 
                     rows={8} 
-                    className="input-premium pt-12 resize-none" 
+                    className="input-underline pt-8 resize-none" 
                     placeholder="Types of deals, typical size, strategic focus..." 
                   />
                 </InputGroup>
@@ -491,7 +491,14 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
       </div>
 
       <style jsx global>{`
-        .input-premium { @apply w-full bg-white/60 backdrop-blur-sm border-2 border-gray-100 rounded-[20px] px-5 py-5 text-sm font-semibold transition-all shadow-sm; @apply focus:ring-8 focus:ring-brand-accent/5 focus:bg-white focus:border-brand-accent focus:shadow-xl focus:shadow-brand-accent/5; @apply placeholder:text-gray-300; }
+        .input-underline {
+          @apply w-full bg-transparent border-0 border-b-2 border-[#ff4d4f] rounded-none px-0 py-3 text-sm font-semibold transition-all outline-none;
+          @apply focus:border-[#ff6a00] focus:ring-0;
+          @apply placeholder:text-gray-300;
+        }
+        select.input-underline {
+          @apply appearance-none;
+        }
         .toggle-switch { @apply w-14 h-8 rounded-full bg-gray-200 transition-all relative; }
         .toggle-switch.active { @apply bg-brand-accent; }
         .toggle-knob { @apply absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-all shadow-sm; }
@@ -501,12 +508,11 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
   );
 }
 
-function InputGroup({ label, children, icon }: { label: string, children: React.ReactNode, icon?: React.ReactNode }) {
+function InputGroup({ label, children }: { label: string, children: React.ReactNode }) {
   return (
     <div className="space-y-3 w-full relative">
       <label className="text-[11px] font-black uppercase tracking-[0.2em] text-brand-secondary ml-2 opacity-70 block">{label}</label>
       <div className="relative group">
-        {icon && <div className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-brand-accent">{icon}</div>}
         {children}
       </div>
     </div>

@@ -10,6 +10,9 @@ import {
   mergeData
 } from '@/lib/ai/deal-engine';
 
+// This ensures the route is never statically optimized during build
+export const dynamic = 'force-dynamic';
+
 function normalizeArrays(data: DealData) {
   return {
     ...data,
@@ -50,6 +53,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // 1. PRODUCTION DEBUG LOGS
+  console.log("API: Chat request received");
+  console.log("ENV CHECK:", {
+    GROQ: !!process.env.GROQ_API_KEY,
+    OPENAI: !!process.env.OPENAI_API_KEY,
+    DATABASE: !!process.env.POSTGRES_URL || !!process.env.DATABASE_URL
+  });
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -62,7 +73,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    // 1. Get or Create Session
+    // 2. Get or Create Session
     let activeChatId = chatId;
     let currentSession;
 
@@ -84,37 +95,60 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Turn Count for Context
+    // 3. Turn Count for Context
     const messageStats = await db.select({ value: count() })
       .from(chatMessages)
       .where(eq(chatMessages.chatId, activeChatId));
     
     const turnCount = messageStats[0]?.value || 0;
 
-    // 3. Save User Message
+    // 4. Save User Message
     await db.insert(chatMessages).values({
       chatId: activeChatId,
       role: 'user',
       content: message,
     });
 
-    // 4. STEP 1 — EXTRACT DATA FROM LLM
+    // 5. STEP 1 — EXTRACT DATA FROM LLM (With Fallback Protection)
     const previousState = (currentSession.sessionData as Partial<DealData>) || {};
-    const extraction = await processDealIntake(message, previousState, turnCount);
+    let extraction;
+    
+    try {
+      extraction = await processDealIntake(message, previousState, turnCount);
+    } catch (aiError) {
+      console.error("AI ERROR (PRODUCTION):", aiError);
+      
+      // FAIL-SAFE FALLBACK (IMPORTANT UX)
+      const fallbackMessage = "I'm temporarily unable to process AI requests, but I've recorded your latest input. Could you tell me a bit more about the deal structure or revenue range while I reconnect?";
+      
+      await db.insert(chatMessages).values({
+        chatId: activeChatId,
+        role: 'assistant',
+        content: fallbackMessage,
+      });
 
-    // 5. STEP 2 — MERGE STATE (Backend Responsibility)
+      return NextResponse.json({
+        type: "fallback",
+        message: fallbackMessage,
+        content: fallbackMessage,
+        chatId: activeChatId,
+        data: previousState
+      });
+    }
+
+    // 6. STEP 2 — MERGE STATE (Backend Responsibility)
     const mergedData = mergeData(previousState, extraction.data);
 
-    // 6. STEP 3 — VALIDATE MISSING FIELDS (CRITICAL BACKEND LOGIC)
+    // 7. STEP 3 — VALIDATE MISSING FIELDS
     const missingFields = getMissingFields(mergedData);
     console.log("BACKEND VALIDATION - Missing:", missingFields);
 
-    // 7. PERSIST MERGED STATE
+    // 8. PERSIST MERGED STATE
     await db.update(chatSessions)
       .set({ sessionData: mergedData })
       .where(eq(chatSessions.id, activeChatId));
 
-    // 8. STEP 4 & 5 — COMPLETION CHECK
+    // 9. STEP 4 & 5 — COMPLETION CHECK
     if (missingFields.length > 0) {
       const responseMessage = extraction.message;
 
@@ -134,7 +168,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 9. STEP 6 — DATABASE INSERT (ONLY WHEN READY)
+    // 10. STEP 6 — DATABASE INSERT (ONLY WHEN READY)
     try {
       console.log("✅ ALL FIELDS PRESENT. PERMANENT STORAGE INITIATED...");
       const cleanedData = normalizeArrays(mergedData);
@@ -167,7 +201,7 @@ export async function POST(req: NextRequest) {
         status: 'live',
       });
 
-      // 10. STEP 7 — FINAL SUCCESS RESPONSE
+      // 11. STEP 7 — FINAL SUCCESS RESPONSE
       const successMessage = "✅ Message recorded. You'll get matched opportunities soon.";
 
       await db.insert(chatMessages).values({
@@ -193,7 +227,11 @@ export async function POST(req: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Chat processing error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('CHAT SYSTEM ERROR (PRODUCTION):', error);
+    return NextResponse.json({ 
+      type: "error",
+      message: "AI processing temporarily unavailable",
+      error: error instanceof Error ? error.message : "Unknown error"
+    }, { status: 500 });
   }
 }

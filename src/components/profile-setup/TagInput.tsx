@@ -54,8 +54,21 @@ export default function TagInput({ label, tags, onChange, maxTags = 5, placehold
       {!isMaxed && (
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
-            <input ref={inputRef} type="text" value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder || 'Type and press Enter'} className="w-full bg-white/60 backdrop-blur-sm border-2 border-gray-100 rounded-[20px] px-5 py-4 text-sm font-semibold transition-all shadow-sm focus:ring-8 focus:ring-brand-accent/5 focus:bg-white focus:border-brand-accent focus:shadow-xl placeholder:text-gray-300 pr-12" />
-            <button type="button" onClick={addTag} disabled={!inputValue.trim()} className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl flex items-center justify-center bg-brand-accent/10 text-brand-accent hover:bg-brand-accent hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <input 
+              ref={inputRef} 
+              type="text" 
+              value={inputValue} 
+              onChange={e => setInputValue(e.target.value)} 
+              onKeyDown={handleKeyDown} 
+              placeholder={placeholder || 'Type and press Enter'} 
+              className="input-underline pr-12" 
+            />
+            <button 
+              type="button" 
+              onClick={addTag} 
+              disabled={!inputValue.trim()} 
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl flex items-center justify-center bg-brand-accent/10 text-brand-accent hover:bg-brand-accent hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            >
               <Plus size={16} strokeWidth={3} />
             </button>
           </div>
