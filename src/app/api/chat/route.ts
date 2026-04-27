@@ -11,11 +11,11 @@ import {
 import Groq from 'groq-sdk';
 
 /**
- * 🎯 SENIOR ENGINEER FIX: PRODUCTION-GRADE API ROUTE
- * Resolves: Silent failures on Vercel, Runtime mismatch, Env access issues.
+ * 🎯 HARDENED PRODUCTION API ROUTE
+ * Runtime: Node.js (Vercel)
+ * AI: Groq (Llama3-8b-8192)
  */
 
-// 1. Force Node.js runtime (Edge often lacks standard env access patterns)
 export const runtime = "nodejs";
 export const dynamic = 'force-dynamic';
 
@@ -55,44 +55,34 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  // 2. Initialize Groq ONLY inside POST handler (Production Safe)
-  const apiKey = process.env.GROQ_API_KEY;
-  
-  // 3. HARD DEBUG LOGGING
-  console.log("🔥 ENV CHECK (GROQ):", !!apiKey);
-
-  if (!apiKey) {
-    console.error("❌ CRITICAL: GROQ_API_KEY is missing from environment variables.");
+  // 1. HARD ENV VALIDATION
+  if (!process.env.GROQ_API_KEY) {
+    console.error("❌ GROQ_API_KEY MISSING IN PRODUCTION");
     return NextResponse.json({
       type: "error",
-      message: "AI service not configured"
+      message: "GROQ_API_KEY is not configured in environment variables."
     }, { status: 500 });
   }
+
+  // 2. INITIALIZE GROQ INSIDE HANDLER ONLY
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    const body = await req.json();
-    const { message, chatId, test } = body;
+    // 3. ADD TEST CALL (CRITICAL)
+    console.log("🚀 INITIATING GROQ TEST CALL...");
+    const test = await groq.chat.completions.create({
+      model: "llama3-8b-8192",
+      messages: [{ role: "user", content: "AI Connection Test" }]
+    });
+    console.log("✅ GROQ WORKING. RESPONSE ID:", test.id);
 
-    // 4. CREATE TEST MODE (Isolates AI vs System issue)
-    if (test) {
-      console.log("🧪 TEST MODE INITIATED...");
-      const groq = new Groq({ apiKey });
-      const testResponse = await groq.chat.completions.create({
-        model: "llama3-8b-8192",
-        messages: [{ role: "user", content: "Say 'AI IS ONLINE' if you can read this." }],
-      });
-      return NextResponse.json({
-        type: "test",
-        message: testResponse.choices[0]?.message?.content || "No response"
-      });
-    }
-
+    const { message, chatId } = await req.json();
     if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 });
 
-    // 5. Get Session & History
+    // 4. Session & History Logic
     let activeChatId = chatId;
     let currentSession;
 
@@ -113,48 +103,24 @@ export async function POST(req: NextRequest) {
 
     await db.insert(chatMessages).values({ chatId: activeChatId, role: 'user', content: message });
 
-    // 6. VERIFY GROQ API CALL
+    // 5. PRIMARY AI LOGIC (llama3-8b-8192)
     const previousState = (currentSession.sessionData as Partial<DealData>) || {};
-    let extraction;
+    console.log("AI: Extracting deal data...");
+    
+    const aiResponse = await groq.chat.completions.create({
+      model: "llama3-8b-8192",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `Context: Turn ${turnCount + 1}. Session Data: ${JSON.stringify(previousState)}\nUser Message: "${message}"` }
+      ],
+      temperature: 0,
+      response_format: { type: "json_object" }
+    });
 
-    try {
-      const groq = new Groq({ apiKey });
-      console.log("AI: Calling Groq (llama3-8b-8192)...");
-      
-      const aiResponse = await groq.chat.completions.create({
-        model: "llama3-8b-8192",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `Turn ${turnCount + 1}. Data: ${JSON.stringify(previousState)}\nUser: "${message}"` }
-        ],
-        temperature: 0,
-        response_format: { type: "json_object" }
-      });
+    const rawContent = aiResponse.choices[0]?.message?.content || "{}";
+    const extraction = JSON.parse(rawContent);
 
-      const raw = aiResponse.choices[0]?.message?.content || "{}";
-      extraction = JSON.parse(raw);
-      console.log("AI: Successfully extracted data.");
-
-    } catch (error: unknown) {
-      // 7. FULL ERROR LOGGING (MANDATORY)
-      const err = error as Error;
-      console.error("🔥 FULL ERROR:", err);
-      console.error("🔥 MESSAGE:", err?.message);
-      console.error("🔥 STACK:", err?.stack);
-
-      // 8. FALLBACK ONLY AFTER LOGGING
-      const fallbackMsg = "I'm temporarily unable to process AI requests, but I've noted your input. Could you tell me more about your revenue range or deal structure?";
-      await db.insert(chatMessages).values({ chatId: activeChatId, role: 'assistant', content: fallbackMsg });
-
-      return NextResponse.json({
-        type: "fallback",
-        message: fallbackMsg,
-        chatId: activeChatId,
-        data: previousState
-      });
-    }
-
-    // 9. Logic continues: Merge, Validate, Store
+    // 6. Merge, Validate & Persist
     const mergedData = mergeData(previousState, extraction.data);
     const missingFields = getMissingFields(mergedData);
 
@@ -200,8 +166,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ type: "complete", message: successMessage, chatId: activeChatId, data: cleanedData });
 
   } catch (error: unknown) {
+    // 7. FULL ERROR LOGGING (NO SILENT FALLBACKS)
     const err = error as Error;
-    console.error('🔥 CRITICAL SYSTEM ERROR:', err, err.message, err.stack);
-    return NextResponse.json({ type: "error", message: "AI processing temporarily unavailable" }, { status: 500 });
+    console.error("🔥 GROQ FAILURE:", err);
+    console.error("🔥 MESSAGE:", err?.message);
+    console.error("🔥 STACK:", err?.stack);
+
+    return NextResponse.json({
+      type: "error",
+      message: err?.message || "AI processing failed. Please check production logs.",
+      error: err?.message
+    }, { status: 500 });
   }
 }
