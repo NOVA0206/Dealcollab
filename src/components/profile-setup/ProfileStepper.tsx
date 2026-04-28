@@ -558,8 +558,8 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         </div>
       </div>
 
-      {/* FIXED FOOTER NAVIGATION */}
-      <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-100 py-6 px-6 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+      {/* STICKY FOOTER NAVIGATION */}
+      <div className="sticky bottom-0 w-full bg-white/80 backdrop-blur-xl border-t border-gray-100 py-6 px-6 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.03)] mt-auto">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <button onClick={handleBack} disabled={currentStep === 1 || isSubmitting} className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all border-2 ${currentStep === 1 ? 'bg-gray-50 text-gray-300 border-gray-100' : 'bg-white border-brand-accent/20 text-brand-accent hover:bg-brand-accent/5'}`}>
             <ChevronLeft size={18} /> Back
