@@ -14,7 +14,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
   const [phone, setPhone] = useState(initialPhone || '');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { update } = useSession();
+  const { data: session, update } = useSession();
 
   const handleSubmit = async (e: React.FormEvent, method: 'whatsapp' | 'call' | 'manual' = 'manual') => {
     e.preventDefault();
@@ -32,21 +32,52 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
     }
 
     try {
-      const res = await fetch('/api/auth/save-phone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: formattedPhone, verificationMethod: method }),
-      });
-      const data = await res.json();
-      
-      if (data.success || res.ok) {
-        // Update session so it includes the new phone
-        await update();
-        onVerify(); // Move to the next step
+      if (session) {
+        // CASE 1: User is already logged in with Google, just saving/linking phone
+        const res = await fetch('/api/auth/save-phone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: formattedPhone, verificationMethod: method }),
+        });
+        const data = await res.json();
+        
+        if (data.success || res.ok) {
+          await update();
+          onVerify();
+        } else {
+          setError(data.error || "Failed to save phone number");
+        }
       } else {
-        setError(data.error || "Failed to save phone number");
+        // CASE 2: User is NOT logged in, trying to Login via Phone
+        // 1. "Verify" the phone (Mock OTP)
+        const verifyRes = await fetch('/api/auth/otp/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: formattedPhone, code: '123456' }), // Mock code
+        });
+        const verifyData = await verifyRes.json();
+
+        if (!verifyRes.ok) {
+           setError(verifyData.error || "Phone verification failed");
+           setIsLoading(false);
+           return;
+        }
+
+        // 2. Trigger NextAuth Credentials Sign In
+        const { signIn } = await import('next-auth/react');
+        const result = await signIn('credentials', {
+           phone: formattedPhone,
+           redirect: false
+        });
+
+        if (result?.error) {
+           setError("Login failed. Please try again.");
+        } else {
+           onVerify();
+        }
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setError("An unexpected error occurred");
     }
     setIsLoading(false);
