@@ -26,11 +26,11 @@ export function calculateProfileCompletion(user: ProfileUser): number {
     user.phone && (user.isPhoneVerified === true || user.is_phone_verified === true),
     user.firmName || user.firm_name,
     user.role,
-    user.category?.length > 0,
+    (user.category?.length ?? 0) > 0,
     user.baseCity || user.base_city || user.baseLocation || user.base_location,
-    user.geographies?.length > 0,
-    user.sectors?.length > 0,
-    user.intent?.length > 0,
+    (user.geographies?.length ?? 0) > 0,
+    (user.sectors?.length ?? 0) > 0,
+    (user.intent?.length ?? 0) > 0,
     user.coAdvisory !== null && user.coAdvisory !== undefined || user.co_advisory !== null && user.co_advisory !== undefined,
   ];
 
