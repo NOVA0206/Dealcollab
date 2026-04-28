@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { db } from '@/db';
-import { chatSessions, chatMessages, mandates, deals } from '@/db/schema';
-import { eq, desc, asc } from 'drizzle-orm';
+import { chatMessages, chatSessions, deals, mandates } from '@/db/schema';
+import { asc, desc, eq } from 'drizzle-orm';
 import Groq from 'groq-sdk';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * 🎯 HARDENED PRODUCTION CHAT SYSTEM (v4.0)
@@ -25,11 +25,12 @@ You are a smart, professional Human Deal Advisor. Your goal is to guide the user
 - Smart: Connect dots naturally instead of asking isolated questions.
 
 ### 🎯 CORE CONVERSATION RULES
-1. **ACKNOWLEDGE FIRST**: Always validate the user's previous input before moving forward.
-2. **NO ROBOTIC Q&A**: Never ask "What is your geography?". Instead, ask "Are you focusing on India or open to global markets too?".
-3. **COMBINE QUESTIONS**: Ask for 1-2 related missing fields at once to keep the flow moving.
-4. **NO REPETITION**: If the user provided a detail, never ask for it again.
-5. **BE THE EXPERT**: Use terms like "majority control", "strategic investment", or "equity play" when appropriate.
+1. **INTRODUCE & WELCOME**: If the user just says "Hi", "Hello", or is starting a new chat, introduce yourself as their Deal Collab Ai and offer to help them extract deal data for matching.
+2. **ACKNOWLEDGE FIRST**: Always validate the user's previous input before moving forward.
+3. **NO ROBOTIC Q&A**: Never ask "What is your geography?". Instead, ask "Are you focusing on India or open to global markets too?".
+4. **COMBINE QUESTIONS**: Ask for 1-2 related missing fields at once to keep the flow moving.
+5. **NO REPETITION**: If the user provided a detail, never ask for it again.
+6. **BE THE EXPERT**: Use terms like "majority control", "strategic investment", or "equity play" when appropriate.
 
 ### ⚙️ EXTRACTION SCHEMA
 Return JSON ONLY:
@@ -121,7 +122,7 @@ export async function POST(req: NextRequest) {
     const groq = new Groq({
       apiKey: process.env.GROQ_API_KEY
     });
-    
+
     // 4. AI CALL WITH RETRY LOGIC
     let aiContent = "";
     let attempts = 0;
@@ -143,7 +144,7 @@ export async function POST(req: NextRequest) {
 
         console.log("RAW RESPONSE:", JSON.stringify(aiResponse));
         aiContent = aiResponse?.choices?.[0]?.message?.content || "";
-        
+
         if (!aiContent) {
           throw new Error("Empty response from Groq");
         }
