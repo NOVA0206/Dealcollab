@@ -16,7 +16,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
   const [error, setError] = useState<string | null>(null);
   const { data: session, update } = useSession();
 
-  const handleSubmit = async (e: React.FormEvent, method: 'whatsapp' | 'call' | 'manual' = 'manual') => {
+  const handleSubmit = async (e: React.SyntheticEvent, method: 'whatsapp' | 'call' | 'manual' = 'manual') => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
@@ -94,6 +94,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
       {/* Header with Back Button */}
       <div className="flex items-center gap-3">
         <button 
+          type="button"
           onClick={onBack}
           className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-all active:scale-90 text-gray-400 group"
         >
@@ -140,7 +141,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
         <div className="space-y-3 pt-2">
           <button
             type="button"
-            onClick={(e) => handleSubmit(e as any, 'manual')}
+            onClick={(e) => handleSubmit(e, 'manual')}
             disabled={isLoading || !phone}
             className="w-full bg-[#1F2937] text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#F97316] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all shadow-xl hover:shadow-[#F97316]/20 disabled:opacity-50 group"
           >
@@ -157,7 +158,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
           <div className="grid grid-cols-2 gap-3 pt-2">
              <button
                 type="button"
-                onClick={(e) => handleSubmit(e as any, 'whatsapp')}
+                onClick={(e) => handleSubmit(e, 'whatsapp')}
                 disabled={isLoading || !phone}
                 className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-green-50 hover:border-green-200 hover:text-green-700 active:scale-[0.98] transition-all disabled:opacity-50"
               >
@@ -166,7 +167,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
              </button>
              <button
                 type="button"
-                onClick={(e) => handleSubmit(e as any, 'call')}
+                onClick={(e) => handleSubmit(e, 'call')}
                 disabled={isLoading || !phone}
                 className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 active:scale-[0.98] transition-all disabled:opacity-50"
               >

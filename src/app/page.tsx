@@ -59,11 +59,11 @@ const AuthContent = () => {
     
     if (!isPhoneVerified) {
       if (step !== 'phone') {
-        setStep('phone');
+        Promise.resolve().then(() => setStep('phone'));
       }
     } else {
       if (step !== 'verified') {
-        setStep('verified');
+        Promise.resolve().then(() => setStep('verified'));
       }
       
       // Handle redirect if not already started
