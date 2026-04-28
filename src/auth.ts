@@ -133,7 +133,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       // Sync DB → JWT: on explicit update() call OR when phone hasn't been loaded yet
-      if (trigger === "update" || token.phone === undefined) {
+      if (trigger === "update" || token.phone === undefined || token.phone === null) {
         try {
           const dbUser = await db.query.users.findFirst({
             where: eq(users.id, token.id as string),

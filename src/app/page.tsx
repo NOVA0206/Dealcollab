@@ -14,7 +14,7 @@ import { ShieldCheck, Sparkles, MessageSquare, AlertCircle, Info } from 'lucide-
 const AuthContent = () => {
   const searchParams = useSearchParams();
   const { data: session, status } = useSession();
-  const { setOnboarding } = useUser();
+  const { setOnboarding, onboarding, profile } = useUser();
   const router = useRouter();
   
   const source = searchParams.get('source');
@@ -48,27 +48,29 @@ const AuthContent = () => {
     if (!mounted) return;
     
     if (status === 'authenticated' && session?.user) {
-      // @ts-expect-error - session.user is extended with custom DB fields
-      const hasPhone = !!session.user.phone;
-      console.log("USER ID:", session.user.id);
+      // Step 1: Check both session and DB profile for phone
+      // @ts-expect-error - custom property
+      const sessionPhone = session.user.phone;
+      const dbPhone = profile?.phone;
+      const isPhoneVerified = onboarding.phoneVerified || !!sessionPhone || !!dbPhone;
+
+      console.log("Onboarding Check:", { isPhoneVerified, sessionPhone, dbPhone });
       
-      if (!hasPhone) {
+      if (!isPhoneVerified) {
         if (step !== 'phone') {
-          Promise.resolve().then(() => setStep('phone'));
+          setStep('phone');
         }
       } else {
         if (step !== 'verified') {
-          Promise.resolve().then(() => {
-            setStep('verified');
-            const timer = setTimeout(() => {
-              router.push('/home');
-            }, 800); 
-            return () => clearTimeout(timer);
-          });
+          setStep('verified');
+          const timer = setTimeout(() => {
+            router.push('/home');
+          }, 800); 
+          return () => clearTimeout(timer);
         }
       }
     }
-  }, [mounted, status, session, step, router]);
+  }, [mounted, status, session, profile, onboarding.phoneVerified, step, router]);
 
   const handleGoogleSignIn = () => {
     setIsLoading(true);
