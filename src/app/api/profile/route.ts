@@ -142,13 +142,15 @@ export async function POST(req: NextRequest) {
 
     const finalTokens = (currentUser.tokens ?? 0) + tokenIncrement;
 
-    console.log("[PROFILE API] Incoming profile_image:", body.profileImage || body.profile_image);
+    console.log("[PROFILE API] SESSION:", session);
+    const incomingPhone = body.phone || (body as { phone_number?: string }).phone_number;
+    console.log("[PROFILE API] Phone being saved:", incomingPhone);
 
     // 3. Build update object (Snake Case)
     const updateData = {
       name: body.fullName || currentUser.name,
       email: body.workEmail || currentUser.email,
-      phone: body.phone || currentUser.phone,
+      phone: incomingPhone || currentUser.phone,
       firm_name: body.firmName || currentUser.firm_name,
       role: body.role || currentUser.role,
       custom_role: body.customRole || currentUser.custom_role,

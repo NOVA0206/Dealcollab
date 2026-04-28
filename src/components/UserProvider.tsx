@@ -93,6 +93,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const [supabase] = useState(() => createSupabaseClient());
   
+  // Hardened Session Audit
+  useEffect(() => {
+    console.log("Session:", session);
+    console.log("Auth Status:", status);
+  }, [session, status]);
+  
   const [tokens, setTokens] = useState<number | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [approvedDeals, setApprovedDeals] = useState<number[]>([]);
@@ -177,7 +183,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         dealSubmitted: prev.dealSubmitted,
       }));
     }
-  }, [session, supabase]);
+  }, [session, supabase, profile]);
 
   // Sync with Supabase (REAL DATA)
   useEffect(() => {

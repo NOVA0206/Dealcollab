@@ -40,20 +40,24 @@ const AuthContent = () => {
 
   // 2. State Machine for Auth Steps & Redirects
   useEffect(() => {
+    console.log("Auth State:", { status, hasSession: !!session });
+    
     if (status === 'authenticated' && session?.user) {
       // @ts-expect-error - session.user is extended with custom DB boolean fields
       const hasPhone = !!session.user.phone;
+      console.log("User Data Check:", { hasPhone, email: session.user.email });
       
       if (!hasPhone) {
-        setStep('phone');
+        Promise.resolve().then(() => setStep('phone'));
       } else {
-        setStep('verified');
-        // Smooth transition to dashboard after successful phone capture
-        const timer = setTimeout(() => {
-          router.refresh();
-          router.push('/home');
-        }, 2000); // 2 second delay to show the success state
-        return () => clearTimeout(timer);
+        Promise.resolve().then(() => {
+          setStep('verified');
+          const timer = setTimeout(() => {
+            console.log("Redirecting to /home...");
+            router.push('/home');
+          }, 1500); 
+          return () => clearTimeout(timer);
+        });
       }
     }
   }, [status, session, router]);

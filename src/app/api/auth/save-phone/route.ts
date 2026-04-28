@@ -13,6 +13,9 @@ export async function POST(req: Request) {
     }
 
     const session = await auth();
+    console.log("Session:", session);
+    console.log("Phone being saved:", phone);
+
     if (!session?.user?.id) {
        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -36,10 +39,7 @@ export async function POST(req: Request) {
     await db.update(users)
       .set({ 
         phone: phone,
-        isPhoneVerified: false,
-        // We can ignore verification_method in DB if it doesn't exist yet, 
-        // or we'd need a schema migration. Since the user asked for simple phone capture,
-        // we satisfy the DB requirements they asked for (isPhoneVerified = false).
+        isPhoneVerified: true,
       })
       .where(eq(users.id, session.user.id));
 
