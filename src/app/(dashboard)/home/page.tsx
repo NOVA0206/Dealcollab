@@ -27,7 +27,9 @@ export default function Home() {
   }, [messages]);
 
   const handleSendMessage = async (text: string) => {
-    // Add user message to local state immediately
+    if (!text.trim()) return;
+
+    // 1. Add user message instantly
     const userMsg = {
       role: 'user' as const,
       content: text,
@@ -37,6 +39,10 @@ export default function Home() {
     setMessages(prev => [...prev, userMsg]);
 
     try {
+      // 2. We can't use the context loading here easily as it's for 'loadChat'
+      // but let's just proceed with the fetch. 
+      // If we wanted a "bot is typing" we'd add a dummy message or use a local loading state.
+      
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -49,31 +55,33 @@ export default function Home() {
         throw new Error(data.error || 'Failed to process deal');
       }
 
+      // 3. Add AI message instantly using functional update
       const aiMsg = {
         role: 'assistant' as const,
-        content: data.message || data.content,
+        content: data.message || data.content || "No response",
         id: (Date.now() + 1).toString(),
         type: data.type,
         questions: data.questions,
       };
 
       setMessages(prev => [...prev, aiMsg]);
+      console.log("Chat updated with bot response:", aiMsg);
       
-      // If it was a new chat, sync the ID and refresh the sidebar sessions
+      // Sync ID and sessions if needed
       if (!activeChatId && data.chatId) {
         setActiveChatId(data.chatId);
         fetchSessions();
       }
     } catch (error: unknown) {
       const err = error as Error;
-      console.error('Deal processing error:', err);
-      const aiMsg = {
+      console.error('Chat error:', err);
+      
+      setMessages(prev => [...prev, {
         role: 'assistant' as const,
         content: `❌ ERROR: ${err.message || 'Unknown error occurred'}`,
         id: (Date.now() + 2).toString(),
         type: 'error' as const
-      };
-      setMessages(prev => [...prev, aiMsg]);
+      }]);
     }
   };
 

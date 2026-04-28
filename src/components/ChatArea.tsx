@@ -18,6 +18,7 @@ interface ChatAreaProps {
 
 export default function ChatArea({ messages }: ChatAreaProps) {
   const { profile } = useUser();
+  console.log("[ChatArea] Rendering with messages:", messages.length);
 
   return (
     <div className="space-y-10 chat-container-max py-4">
