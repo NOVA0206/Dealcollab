@@ -173,41 +173,70 @@ export async function POST(req: NextRequest) {
       content: extraction.message || "I've noted that. What's next?",
     });
 
-    // 7. DEAL EXTRACTION LOGIC
-    if (extraction.is_complete) {
-      const d = extraction.data;
-      await db.insert(mandates).values({
-        userId: session.user.id,
-        rawText: message,
-        normalisedText: JSON.stringify(d),
-        intent: d.intent,
-        sectors: d.sectors,
-        geographies: d.geographies,
-        dealSizeMinCr: d.deal_size_min_cr?.toString(),
-        dealSizeMaxCr: d.deal_size_max_cr?.toString(),
-        revenueMinCr: d.revenue_min_cr?.toString(),
-        revenueMaxCr: d.revenue_max_cr?.toString(),
-        dealStructure: d.deal_structure,
-        specialConditions: d.special_conditions,
-        status: 'ACTIVE',
-        source: 'WEB',
-      });
+    // 7. DEAL EXTRACTION LOGIC & PERSISTENCE
+    const d = extraction.data;
+    const isComplete = 
+      d.intent && 
+      d.sectors?.length > 0 && 
+      d.geographies?.length > 0 && 
+      d.deal_size_min_cr !== null && 
+      d.deal_size_max_cr !== null && 
+      d.deal_structure;
 
-      await db.insert(deals).values({
-        userId: session.user.id,
-        title: `${d.intent}: ${d.sectors[0]} in ${d.geographies[0]}`,
-        sector: d.sectors[0],
-        region: d.geographies[0],
-        size: d.deal_size_min_cr ? `${d.deal_size_min_cr} Cr` : 'TBD',
-        status: 'live',
-      });
+    console.log("🧠 FINAL DATA:", JSON.stringify(d));
+
+    if (isComplete) {
+      console.log("✅ DATA COMPLETE - INSERTING INTO DB");
+      try {
+        // Step 3: Insert into Mandates
+        await db.insert(mandates).values({
+          userId: session.user.id,
+          rawText: message,
+          normalisedText: JSON.stringify(d),
+          intent: d.intent,
+          sectors: d.sectors,
+          geographies: d.geographies,
+          dealSizeMinCr: d.deal_size_min_cr?.toString(),
+          dealSizeMaxCr: d.deal_size_max_cr?.toString(),
+          revenueMinCr: d.revenue_min_cr?.toString(),
+          revenueMaxCr: d.revenue_max_cr?.toString(),
+          dealStructure: d.deal_structure,
+          specialConditions: d.special_conditions || [],
+          urgency: d.inferred_urgency || "Medium",
+          buyerType: d.inferred_buyer_type || "Strategic",
+          status: 'ACTIVE',
+          source: 'WEB',
+        });
+
+        // Step 4: Insert into Deals
+        await db.insert(deals).values({
+          userId: session.user.id,
+          title: `${d.intent}: ${d.sectors.join(", ")} deal`,
+          sector: d.sectors.join(", "),
+          region: d.geographies.join(", "),
+          size: `${d.deal_size_min_cr}-${d.deal_size_max_cr} Cr`,
+          status: 'live', // Note: status is an enum [draft, live, paused, closed]
+        });
+
+        console.log("✅ DB INSERT SUCCESSFUL");
+      } catch (dbErr) {
+        console.error("❌ DB INSERT FAILED:", dbErr);
+        // We continue to return the AI message even if DB insert fails for UX, 
+        // but it's logged for investigation.
+      }
+    } else {
+      console.log("⏳ DATA INCOMPLETE - WAITING FOR MORE DETAILS");
     }
+
+    const finalMessage = isComplete 
+      ? "Perfect — got everything I need. I’ll record this and start matching you with relevant opportunities."
+      : extraction.message;
 
     return Response.json({
       success: true,
-      data: aiContent, // Step 8: Explicitly return raw content as 'data'
-      message: extraction.message,
-      is_complete: extraction.is_complete,
+      data: aiContent,
+      message: finalMessage,
+      is_complete: isComplete,
       chatId: activeChatId
     });
 
