@@ -8,13 +8,17 @@ export async function POST(req: Request) {
   try {
     const { phone } = await req.json();
 
-    if (!phone || phone.length < 10) {
+    if (!phone) {
+      return NextResponse.json({ error: 'Phone is required' }, { status: 400 });
+    }
+
+    if (phone.length < 10) {
       return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
     }
 
     const session = await auth();
-    console.log("Session:", session);
-    console.log("Phone being saved:", phone);
+    console.log("Saving phone:", phone);
+    console.log("User ID:", session?.user?.id);
 
     if (!session?.user?.id) {
        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
