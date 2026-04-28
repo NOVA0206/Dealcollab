@@ -33,7 +33,9 @@ export default function ProfilePage() {
 
    if (showSuccess) {
       return <ProfileSuccessScreen onDashboardClick={() => {
-         router.push('/deal-dashboard');
+         router.push('/profile');
+         setShowSuccess(false);
+         setIsEditing(false);
       }} />;
    }
 
