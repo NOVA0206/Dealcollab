@@ -26,10 +26,36 @@ const AuthContent = () => {
   const [step, setStep] = useState<'google' | 'phone' | 'verified'>('google');
   const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
 
   useEffect(() => {
     Promise.resolve().then(() => setMounted(true));
   }, []);
+
+  // 1. Redirect Effect (The "Brain")
+  useEffect(() => {
+    if (isVerified) {
+      console.log("SUCCESS: Identity Verified. Redirecting to /home...");
+      
+      // UX Delay (800ms)
+      const redirectTimer = setTimeout(() => {
+        console.log("Redirect triggered → /home");
+        router.push('/home');
+      }, 800);
+
+      // Fallback Hard Redirect (3000ms) - Safety for edge cases
+      const fallbackTimer = setTimeout(() => {
+        console.log("Safety Fallback triggered → Refreshing to /home");
+        window.location.href = '/home';
+      }, 3000);
+
+      return () => {
+        clearTimeout(redirectTimer);
+        clearTimeout(fallbackTimer);
+      };
+    }
+  }, [isVerified, router]);
+
   const [whatsappVerifiedPhone, setWhatsappVerifiedPhone] = useState<string | null>(null);
 
   // 1. Handle WhatsApp Link initialization (Smart Entry)
@@ -43,9 +69,7 @@ const AuthContent = () => {
     }
   }, [isFromWhatsApp, phoneFromUrl]);
 
-  const redirectStarted = React.useRef(false);
-
-  // 2. State Machine for Auth Steps & Redirects
+  // 2. State Machine for Auth Steps
   useEffect(() => {
     if (!mounted || status !== 'authenticated' || !session?.user) return;
     
@@ -53,44 +77,34 @@ const AuthContent = () => {
     // @ts-expect-error - custom property
     const sessionPhone = session.user.phone;
     const dbPhone = profile?.phone;
-    const isPhoneVerified = onboarding.phoneVerified || !!sessionPhone || !!dbPhone;
+    const phoneExists = onboarding.phoneVerified || !!sessionPhone || !!dbPhone;
 
-    console.log("Onboarding Check:", { isPhoneVerified, sessionPhone, dbPhone, step });
+    console.log("Verification Status:", { phoneExists, sessionPhone, dbPhone });
     
-    if (!isPhoneVerified) {
+    if (!phoneExists) {
       if (step !== 'phone') {
         Promise.resolve().then(() => setStep('phone'));
       }
     } else {
+      // User is verified (Returning or just finished)
       if (step !== 'verified') {
         Promise.resolve().then(() => setStep('verified'));
       }
-      
-      // Handle redirect if not already started
-      if (!redirectStarted.current) {
-        redirectStarted.current = true;
-        console.log("REDIRECTING TO HOME...");
-        const timer = setTimeout(() => {
-          router.push('/home');
-        }, 800); 
-        return () => clearTimeout(timer);
+      if (!isVerified) {
+        Promise.resolve().then(() => setIsVerified(true));
       }
     }
-  }, [mounted, status, session, profile, onboarding.phoneVerified, step, router]);
+  }, [mounted, status, session, profile, onboarding.phoneVerified, step, isVerified]);
 
   const handleGoogleSignIn = () => {
     setIsLoading(true);
-    // Use redirect: false to prevent NextAuth from forcing a reload, 
-    // allowing our state machine to catch the session update.
     signIn('google');
   };
 
   const handlePhoneSuccess = () => {
     setOnboarding('phoneVerified', true);
     setStep('verified');
-    // After the DB write + session.update() in PhoneVerification, the JWT
-    // now has 'phone' set. Redirect immediately to the dashboard.
-    setTimeout(() => router.push('/home'), 800);
+    setIsVerified(true);
   };
 
   return (
