@@ -69,7 +69,7 @@ export default function MatchDetailPage() {
   }, [id]);
 
   const handleSendEOI = () => {
-    if (tokens < 50) return;
+    if ((tokens ?? 0) < 50) return;
     
     setIsSending(true);
     // Simulate process
@@ -94,7 +94,7 @@ export default function MatchDetailPage() {
 
   if (!match) return null;
 
-  const hasTokens = tokens >= 50;
+  const hasTokens = (tokens ?? 0) >= 50;
 
   return (
     <div className="flex-1 flex flex-col w-full h-full bg-[#F9FAFB] relative overflow-y-auto">
@@ -212,7 +212,7 @@ export default function MatchDetailPage() {
                     <div className="flex items-center gap-2 justify-center sm:justify-start">
                        <Coins size={18} className={hasTokens ? 'text-[#F97316]' : 'text-red-500'} />
                        <p className={`text-base font-bold ${hasTokens ? 'text-[#1F2937]' : 'text-red-600'}`}>
-                          {hasTokens ? `Your balance: ${tokens} tokens` : 'Insufficient tokens'}
+                          {hasTokens ? `Your balance: ${tokens ?? 0} tokens` : 'Insufficient tokens'}
                        </p>
                     </div>
                     {tokens === 0 && (
