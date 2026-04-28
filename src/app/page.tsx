@@ -40,27 +40,28 @@ const AuthContent = () => {
 
   // 2. State Machine for Auth Steps & Redirects
   useEffect(() => {
-    console.log("Auth State:", { status, hasSession: !!session });
-    
     if (status === 'authenticated' && session?.user) {
       // @ts-expect-error - session.user is extended with custom DB boolean fields
       const hasPhone = !!session.user.phone;
-      console.log("User Data Check:", { hasPhone, email: session.user.email });
+      console.log("USER ID:", session.user.id);
       
       if (!hasPhone) {
-        Promise.resolve().then(() => setStep('phone'));
+        if (step !== 'phone') {
+          Promise.resolve().then(() => setStep('phone'));
+        }
       } else {
-        Promise.resolve().then(() => {
-          setStep('verified');
-          const timer = setTimeout(() => {
-            console.log("Redirecting to /home...");
-            router.push('/home');
-          }, 1500); 
-          return () => clearTimeout(timer);
-        });
+        if (step !== 'verified') {
+          Promise.resolve().then(() => {
+            setStep('verified');
+            const timer = setTimeout(() => {
+              router.push('/home');
+            }, 1000); 
+            return () => clearTimeout(timer);
+          });
+        }
       }
     }
-  }, [status, session, router]);
+  }, [status, session, step, router]);
 
   const handleGoogleSignIn = () => {
     setIsLoading(true);

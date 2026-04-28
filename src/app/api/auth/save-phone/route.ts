@@ -44,8 +44,12 @@ export async function POST(req: Request) {
       .set({ 
         phone: phone,
         isPhoneVerified: true,
+        profileCompletion: 100, // Explicitly mark as complete for onboarding flow
       })
       .where(eq(users.id, session.user.id));
+
+    console.log("PHONE:", phone);
+    console.log("USER ID:", session.user.id);
 
     return NextResponse.json({ success: true });
   } catch (error) {
