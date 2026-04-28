@@ -133,14 +133,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       if (trigger === "update" || !token.tokens) {
-        const dbUser = await db.query.users.findFirst({
-          where: eq(users.id, token.id as string),
-        });
-        if (dbUser) {
-          token.isPhoneVerified = dbUser.isPhoneVerified === true || String(dbUser.isPhoneVerified) === 'true';
-          token.phone = dbUser.phone;
-          token.tokens = dbUser.tokens || 0;
-          token.profileCompletion = dbUser.profileCompletion || 0;
+        try {
+          const dbUser = await db.query.users.findFirst({
+            where: eq(users.id, token.id as string),
+          });
+          if (dbUser) {
+            token.isPhoneVerified = dbUser.isPhoneVerified === true || String(dbUser.isPhoneVerified) === 'true';
+            token.phone = dbUser.phone;
+            token.tokens = dbUser.tokens || 0;
+            token.profileCompletion = dbUser.profileCompletion || 0;
+          }
+        } catch (error) {
+          console.error("[AUTH JWT] Profile sync failed:", error);
+          // Return existing token instead of failing the whole update() call
         }
       }
 

@@ -171,8 +171,9 @@ export async function POST(req: NextRequest) {
       collaboration_model: body.collaborationModels || currentUser.collaboration_model,
       profile_attachment_url: body.attachmentUrl || body.profile_attachment_url || currentUser.profile_attachment_url,
       additional_info: body.additionalInfo || currentUser.additional_info,
-      profile_completion: progress,
+      profile_completion: Math.max(progress, currentUser.profile_completion || 0),
       profile_completed_once: currentUser.profile_completed_once || (progress === 100),
+      is_phone_verified: incomingPhone ? true : currentUser.isPhoneVerified,
       tokens: (body.tokens !== undefined && body.tokens !== null) ? body.tokens : finalTokens,
       // STRICT: Only update profile_image if a value is provided in the request
       // and it is NOT a Google avatar URL (Google avatars are fallbacks, not DB values)

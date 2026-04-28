@@ -22,9 +22,14 @@ const AuthContent = () => {
   const error = searchParams.get('error');
   const logoutSuccess = searchParams.get('logout') === 'success';
   const isFromWhatsApp = source === 'whatsapp';
-
+  
   const [step, setStep] = useState<'google' | 'phone' | 'verified'>('google');
   const [isLoading, setIsLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    Promise.resolve().then(() => setMounted(true));
+  }, []);
   const [whatsappVerifiedPhone, setWhatsappVerifiedPhone] = useState<string | null>(null);
 
   // 1. Handle WhatsApp Link initialization (Smart Entry)
@@ -40,8 +45,10 @@ const AuthContent = () => {
 
   // 2. State Machine for Auth Steps & Redirects
   useEffect(() => {
+    if (!mounted) return;
+    
     if (status === 'authenticated' && session?.user) {
-      // @ts-expect-error - session.user is extended with custom DB boolean fields
+      // @ts-expect-error - session.user is extended with custom DB fields
       const hasPhone = !!session.user.phone;
       console.log("USER ID:", session.user.id);
       
@@ -55,13 +62,13 @@ const AuthContent = () => {
             setStep('verified');
             const timer = setTimeout(() => {
               router.push('/home');
-            }, 1000); 
+            }, 800); 
             return () => clearTimeout(timer);
           });
         }
       }
     }
-  }, [status, session, step, router]);
+  }, [mounted, status, session, step, router]);
 
   const handleGoogleSignIn = () => {
     setIsLoading(true);
