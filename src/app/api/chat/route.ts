@@ -113,10 +113,46 @@ export async function POST(req: NextRequest) {
       orderBy: [asc(chatMessages.createdAt)],
     });
 
-    const formattedHistory = history.map(h => ({
-      role: h.role as "user" | "assistant" | "system",
-      content: h.content
-    }));
+    const formattedHistory = history.map(h => {
+      let content = h.content;
+      if (h.role === 'assistant') {
+        try {
+          const parsed = JSON.parse(h.content);
+          content = parsed.message || h.content;
+        } catch {
+          // Fallback if not JSON
+        }
+      }
+      return {
+        role: h.role as "user" | "assistant" | "system",
+        content: content
+      };
+    });
+
+    // --- MEMORY LOGIC: Reconstruct State from History ---
+    let conversationData = {
+      intent: null,
+      sectors: [],
+      geographies: [],
+      deal_size_min_cr: null,
+      deal_size_max_cr: null,
+      deal_structure: null,
+      special_conditions: []
+    };
+
+    // Scan backwards for the latest state
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === 'assistant') {
+        try {
+          const parsed = JSON.parse(history[i].content);
+          if (parsed.data) {
+            conversationData = { ...conversationData, ...parsed.data };
+            break; // Found latest state
+          }
+        } catch { continue; }
+      }
+    }
+    console.log("🧠 CURRENT STATE:", JSON.stringify(conversationData));
 
     // 3. GROQ CLIENT INITIALIZATION (INSIDE HANDLER ONLY)
     const groq = new Groq({
@@ -135,7 +171,7 @@ export async function POST(req: NextRequest) {
         const aiResponse = await groq.chat.completions.create({
           model: currentModel,
           messages: [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: SYSTEM_PROMPT + `\n\nCURRENT_STATE_OF_EXTRACTION: ${JSON.stringify(conversationData)}` },
             ...formattedHistory
           ],
           temperature: 0.3,
@@ -166,11 +202,11 @@ export async function POST(req: NextRequest) {
       throw new Error("Invalid AI response format");
     }
 
-    // 6. PERSIST ASSISTANT RESPONSE
+    // 6. PERSIST ASSISTANT RESPONSE (FULL JSON FOR MEMORY)
     await db.insert(chatMessages).values({
       chatId: activeChatId,
       role: 'assistant',
-      content: extraction.message || "I've noted that. What's next?",
+      content: JSON.stringify(extraction),
     });
 
     // 7. DEAL EXTRACTION LOGIC & PERSISTENCE

@@ -33,7 +33,19 @@ export async function GET(
       orderBy: [asc(chatMessages.createdAt)],
     });
 
-    return NextResponse.json(messages);
+    const cleanedMessages = messages.map(m => {
+      if (m.role === 'assistant') {
+        try {
+          const parsed = JSON.parse(m.content);
+          return { ...m, content: parsed.message || m.content };
+        } catch {
+          return m;
+        }
+      }
+      return m;
+    });
+
+    return NextResponse.json(cleanedMessages);
   } catch (error: unknown) {
     const err = error as Error;
     console.error('Messages fetch error:', err);
