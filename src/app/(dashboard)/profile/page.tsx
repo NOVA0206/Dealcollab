@@ -14,7 +14,9 @@ export default function ProfilePage() {
    const [showSuccess, setShowSuccess] = useState(false);
 
    const handleComplete = (shouldShowSuccess?: boolean) => {
+      // Force exit from editing/setup mode
       setIsEditing(false);
+      
       if (shouldShowSuccess) {
          setShowSuccess(true);
       }
