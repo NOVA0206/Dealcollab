@@ -154,6 +154,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
             )}
           </button>
 
+          <div className="grid grid-cols-2 gap-3 pt-2">
              <button
                 type="button"
                 onClick={(e) => handleSubmit(e as any, 'whatsapp')}
