@@ -78,11 +78,11 @@ const AuthContent = () => {
   };
 
   const handlePhoneSuccess = () => {
-    setOnboarding('phoneVerified', true); // Keep the local state name for consistency
-    // Update the next-auth session to reflect the newly saved phone
-    const event = new Event("visibilitychange");
-    document.dispatchEvent(event);
+    setOnboarding('phoneVerified', true);
     setStep('verified');
+    // After the DB write + session.update() in PhoneVerification, the JWT
+    // now has 'phone' set. Redirect immediately to the dashboard.
+    setTimeout(() => router.push('/home'), 800);
   };
 
   return (

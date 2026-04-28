@@ -42,7 +42,13 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
         const data = await res.json();
         
         if (data.success || res.ok) {
-          await update();
+          // Refresh the JWT with the new phone number.
+          // Use try/catch so a transient DB issue doesn't block the user.
+          try {
+            await update();
+          } catch (updateErr) {
+            console.warn("[PhoneVerification] session.update() failed (non-fatal):", updateErr);
+          }
           onVerify();
         } else {
           setError(data.error || "Failed to save phone number");
