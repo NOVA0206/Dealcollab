@@ -63,9 +63,12 @@ export default function AvatarUpload({ file, existingUrl, onFileSelect }: Avatar
           </div>
         </div>
 
-        {file && (
+        {(file || existingUrl) && (
           <button 
-            onClick={() => onFileSelect(null)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFileSelect(null);
+            }}
             className="absolute -top-2 -right-2 w-8 h-8 rounded-xl bg-red-50 text-red-500 border border-red-100 flex items-center justify-center shadow-sm hover:bg-red-100 transition-all z-10"
           >
             <X size={16} />

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/utils/supabase/server';
 import { auth } from '@/auth';
-import { calculateProgress, validateFullProfile, ProfileFormData } from '@/lib/validation/profile';
+import { validateFullProfile, ProfileFormData } from '@/lib/validation/profile';
+import { calculateProfileCompletion } from '@/lib/profileCompletion';
 
 export async function GET() {
   const supabase = createServerSupabaseClient();
@@ -128,19 +129,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // 2. Dynamic Progress Calculation
-    const progress = calculateProgress(body);
-
-    let tokenIncrement = 0;
+    // Reward logic: will be re-evaluated after re-calculating the new score based on DB state
     let shouldShowSuccess = false;
-
-    // Reward logic: +100 tokens if reaching 100% for the first time
-    if (progress === 100 && !currentUser.profile_completed_once) {
-      tokenIncrement = 100;
-      shouldShowSuccess = true;
-    }
-
-    const finalTokens = (currentUser.tokens ?? 0) + tokenIncrement;
 
     const incomingPhone = body.phone || (body as { phone_number?: string }).phone_number;
     console.log("Saving phone:", incomingPhone);
@@ -163,33 +153,39 @@ export async function POST(req: NextRequest) {
       cross_border: body.crossBorder !== undefined ? body.crossBorder : currentUser.cross_border,
       corridors: body.corridors || currentUser.corridors,
       sectors: body.primarySectors || currentUser.sectors,
-      intent: body.currentFocus || currentUser.intent,
-      expertise_description: body.expertiseDescription || currentUser.expertise_description,
-      active_mandates: body.activeMandates || currentUser.active_mandates,
-      priority_sectors: body.primarySectors || currentUser.priority_sectors,
+      expertise_description: body.expertiseDescription !== undefined ? body.expertiseDescription : currentUser.expertise_description,
+      active_mandates: body.activeMandates !== undefined ? body.activeMandates : currentUser.active_mandates,
+      priority_sectors: body.primarySectors !== undefined ? body.primarySectors : currentUser.priority_sectors,
       co_advisory: body.coAdvisory !== undefined ? body.coAdvisory : currentUser.co_advisory,
       collaboration_model: body.collaborationModels || currentUser.collaboration_model,
-      profile_attachment_url: body.attachmentUrl || body.profile_attachment_url || currentUser.profile_attachment_url,
-      additional_info: body.additionalInfo || currentUser.additional_info,
-      profile_completion: Math.max(progress, currentUser.profile_completion || 0),
-      profile_completed_once: currentUser.profile_completed_once || (progress === 100),
+      profile_attachment_url: body.attachmentUrl !== undefined ? body.attachmentUrl : (body.profile_attachment_url !== undefined ? body.profile_attachment_url : currentUser.profile_attachment_url),
+      additional_info: body.additionalInfo !== undefined ? body.additionalInfo : currentUser.additional_info,
+      // SAFE UPDATE: Prevent overwriting intent/currentFocus with empty values if not provided
+      intent: (body.currentFocus !== undefined && body.currentFocus !== null && body.currentFocus.length > 0) 
+        ? body.currentFocus 
+        : currentUser.intent,
+      profile_completion: currentUser.profile_completion, // Will be updated after this save
+      profile_completed_once: currentUser.profile_completed_once,
       is_phone_verified: incomingPhone ? true : currentUser.isPhoneVerified,
-      tokens: (body.tokens !== undefined && body.tokens !== null) ? body.tokens : finalTokens,
+      tokens: (body.tokens !== undefined && body.tokens !== null) ? body.tokens : (currentUser.tokens ?? 0),
       // STRICT: Only update profile_image if a value is provided in the request
       // and it is NOT a Google avatar URL (Google avatars are fallbacks, not DB values)
       profile_image: (() => {
-        const incoming = (body.profileImage !== undefined && body.profileImage !== null) 
+        const incoming = (body.profileImage !== undefined) 
           ? body.profileImage 
-          : (body.profile_image !== undefined && body.profile_image !== null)
+          : (body.profile_image !== undefined)
             ? body.profile_image
-            : null;
+            : undefined;
+        
+        if (incoming === undefined) return currentUser.profile_image;
+        if (incoming === '' || incoming === null) return null;
         
         if (incoming && incoming.includes('googleusercontent.com')) {
           console.log('[PROFILE API] REJECTING GOOGLE URL FOR profile_image:', incoming);
           return currentUser.profile_image;
         }
         
-        return incoming || currentUser.profile_image;
+        return incoming;
       })(),
     };
 
@@ -204,8 +200,33 @@ export async function POST(req: NextRequest) {
 
     if (updateError) throw updateError;
 
-    // Log Transaction if tokens added
-    if (tokenIncrement > 0) {
+    // 5. Recalculate completion using the NEW logic based on DB state
+    const { data: updatedUser } = await supabase
+      .from("users")
+      .select("*")
+      .ilike("email", email)
+      .single();
+
+    const score = calculateProfileCompletion(updatedUser);
+    let tokenIncrement = 0;
+    
+    // Reward logic: +100 tokens if reaching 100% for the first time
+    if (score === 100 && !currentUser.profile_completed_once) {
+      tokenIncrement = 100;
+      const finalTokensWithReward = (updatedUser.tokens ?? 0) + tokenIncrement;
+      
+      await supabase
+        .from("users")
+        .update({ 
+          profile_completion: score,
+          profile_completed_once: true,
+          tokens: finalTokensWithReward
+        })
+        .ilike("email", email);
+        
+      shouldShowSuccess = true;
+
+      // Log Transaction if tokens added
       await supabase
         .from("token_transactions")
         .insert({
@@ -213,15 +234,20 @@ export async function POST(req: NextRequest) {
           type: 'credit',
           action: 'Profile Completion Reward',
           amount: tokenIncrement,
-          balance_after: finalTokens,
+          balance_after: finalTokensWithReward,
         });
+    } else {
+      await supabase
+        .from("users")
+        .update({ profile_completion: score })
+        .ilike("email", email);
     }
 
     return NextResponse.json({ 
       success: true, 
       rewarded: tokenIncrement > 0,
       shouldShowSuccess,
-      progress
+      progress: score
     });
   } catch (error) {
     console.error('Profile save error:', error);

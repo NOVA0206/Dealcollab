@@ -49,6 +49,7 @@ export interface UserProfile {
   profileAttachmentUrl?: string | null;
   additionalInfo?: string | null;
   profileCompletion?: number;
+  currentFocus?: string[] | null;
   coAdvisory?: boolean | null;
   collaborationModels?: string[] | null;
 }

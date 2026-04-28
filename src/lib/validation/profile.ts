@@ -360,10 +360,6 @@ export function calculateProgress(data: ProfileFormData): number {
     data.activeMandates.length > 0,
     // Section 6: Collaboration
     true, // coAdvisory always has a value
-    // Section 7: Attachment (optional, bonus)
-    !!data.attachmentUrl || !!data.attachmentFile,
-    // Section 8: Additional Info (optional, bonus)
-    data.additionalInfo.trim().length > 10,
   ];
 
   const filled = checks.filter(Boolean).length;

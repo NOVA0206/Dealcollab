@@ -72,7 +72,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         crossBorder: initialData.crossBorder || initialData.cross_border || false,
         corridors: initialData.corridors || [],
         primarySectors: initialData.sectors || [],
-        currentFocus: initialData.intent || [],
+        currentFocus: initialData.currentFocus || initialData.intent || [],
         expertiseDescription: initialData.expertiseDescription || initialData.expertise_description || '',
         activeMandates: initialData.activeMandates || initialData.active_mandates || [],
         coAdvisory: initialData.coAdvisory || initialData.co_advisory || false,
@@ -188,7 +188,11 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         body: JSON.stringify({ 
           ...submitData, 
           attachmentUrl, 
-          profileImage: finalProfileImage // Ensure we use the NEW one
+          profileImage: finalProfileImage, // Ensure we use the NEW one
+          // Step 5: Prevent empty array overwrite
+          currentFocus: (submitData.currentFocus && submitData.currentFocus.length > 0) 
+            ? submitData.currentFocus 
+            : undefined
         }),
       });
       const result = await response.json();
@@ -294,7 +298,13 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                   <AvatarUpload 
                     file={formData.avatarFile}
                     existingUrl={formData.profileImage}
-                    onFileSelect={(file) => updateFormData({ avatarFile: file })}
+                    onFileSelect={(file) => {
+                      if (file === null) {
+                        updateFormData({ avatarFile: null, profileImage: '' });
+                      } else {
+                        updateFormData({ avatarFile: file });
+                      }
+                    }}
                   />
 
                   <div className="grid grid-cols-1 gap-6">
@@ -505,18 +515,24 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
 
             {/* STEP 7: PROFILE ATTACHMENT */}
             <AnimatedStepWrapper direction={direction} isActive={currentStep === 7}>
-              <StepCard title="Profile Attachment" helper="Upload your company or professional credentials">
+              <StepCard title="Profile Attachment (Optional)" helper="Upload your company or professional credentials">
                 <FileUpload 
                   file={formData.attachmentFile} 
                   existingUrl={formData.attachmentUrl}
-                  onFileSelect={(file) => updateFormData({ attachmentFile: file })} 
+                  onFileSelect={(file) => {
+                    if (file === null) {
+                      updateFormData({ attachmentFile: null, attachmentUrl: '' });
+                    } else {
+                      updateFormData({ attachmentFile: file });
+                    }
+                  }} 
                 />
               </StepCard>
             </AnimatedStepWrapper>
 
             {/* STEP 8: ADDITIONAL INFORMATION */}
             <AnimatedStepWrapper direction={direction} isActive={currentStep === 8}>
-              <StepCard title="Additional Information" helper="Tell us more about your work and preferences">
+              <StepCard title="Additional Information (Optional)" helper="Tell us more about your work and preferences">
                 <InputGroup label="Tell us more about your work, deal preferences, or anything important">
                   <textarea 
                     value={formData.additionalInfo} 
