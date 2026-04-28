@@ -175,6 +175,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         userAvatar: userAvatar, // UI fallback
         additionalInfo: data.additionalInfo || data.additional_info,
         profileCompletion: data.profileCompletion || data.profile_completion,
+        intent: data.intent || data.currentFocus || [],
+        currentFocus: data.currentFocus || data.intent || [],
         tokens: dbTokens,
       });
       

@@ -82,7 +82,17 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         additionalInfo: initialData.additionalInfo || initialData.additional_info || '',
       }));
     } 
-    // Priority 2: Fallback to Session (if DB not yet hydrated)
+    // Handle updates to initialData if it changes while mounted (e.g. after a save)
+    else if (initialData && dbHydrated.current) {
+      setFormData(prev => {
+        // Only update if currentFocus is empty in form but present in initialData
+        const initialFocus = initialData.currentFocus || initialData.intent || [];
+        if (prev.currentFocus.length === 0 && initialFocus.length > 0) {
+          return { ...prev, currentFocus: initialFocus };
+        }
+        return prev;
+      });
+    }    // Priority 2: Fallback to Session (if DB not yet hydrated)
     else if (session?.user && !dbHydrated.current && !sessionHydrated.current) {
       sessionHydrated.current = true;
       setFormData(prev => ({
