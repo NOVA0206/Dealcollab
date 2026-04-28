@@ -7,7 +7,7 @@ interface StatusBadgeProps {
 }
 
 const statusColors: Record<DealStatus, { bg: string, text: string }> = {
-  'Searching Match': { bg: 'bg-[#F97316]/10', text: 'text-[#F97316]' },
+  'Searching Match': { bg: 'bg-primary-soft border border-primary/20', text: 'text-primary-hover' },
   'Matched': { bg: 'bg-green-100', text: 'text-green-600' },
   'EOI Received': { bg: 'bg-blue-50', text: 'text-blue-500' },
   'EOI Sent': { bg: 'bg-blue-50', text: 'text-blue-500' },

@@ -32,15 +32,15 @@ export default function DealLogCard({
   return (
     <div className="w-full flex flex-col group">
       <div className={`bg-white border transition-all duration-300 rounded-xl px-5 py-4 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] ${
-        isExpanded ? 'border-[#F97316]/30 bg-gray-50/30' : 'border-[#E5E7EB]'
+        isExpanded ? 'border-primary/50 bg-primary-soft/50' : 'border-border'
       }`}>
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <h3 className="text-lg font-bold text-[#1F2937] leading-none group-hover:text-[#F97316] transition-colors">
+            <h3 className="text-lg font-bold text-foreground leading-none group-hover:text-primary-hover transition-colors">
               {deal.deal}
             </h3>
             {deal.isNew && (
-              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest bg-[#F97316] text-white animate-pulse">
+              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest bg-primary text-foreground animate-pulse">
                 New
               </span>
             )}

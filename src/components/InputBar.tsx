@@ -36,7 +36,7 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
   };
 
   return (
-    <div className="w-full bg-white pb-8 pt-2 px-4 md:px-6">
+    <div className="w-full bg-background pb-8 pt-2 px-4 md:px-6">
       <div className="max-w-3xl mx-auto relative group">
         <input 
           type="file"
@@ -46,11 +46,11 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
           accept=".pdf,.doc,.docx,.txt,image/*"
         />
         
-        <div className="flex items-center bg-white border border-gray-200 rounded-2xl shadow-lg shadow-gray-200/50 hover:shadow-xl hover:border-gray-300 transition-all focus-within:ring-2 focus-within:ring-orange-500/10 focus-within:border-orange-500 overflow-hidden">
+        <div className="flex items-center bg-white border border-border rounded-2xl shadow-lg shadow-primary/5 hover:shadow-xl hover:border-primary/30 transition-all focus-within:ring-4 focus-within:ring-primary/10 focus-within:border-primary overflow-hidden">
           <button 
             type="button"
             onClick={handlePlusClick}
-            className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-gray-400 hover:text-orange-500 transition-colors"
+            className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-brand-secondary hover:text-primary-hover transition-colors"
           >
             <Plus size={22} />
           </button>
@@ -62,20 +62,20 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask DealCollab AI anything..." 
-              className="flex-1 bg-transparent border-none outline-none text-foreground text-[16px] py-4 pr-4 placeholder:text-gray-400"
+              className="flex-1 bg-transparent border-none outline-none text-foreground text-[16px] py-4 pr-4 placeholder:text-brand-secondary/60"
             />
             
             <button 
               type="submit"
               disabled={!inputValue.trim()}
-              className="mr-3 w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale active:scale-95 shadow-md shadow-orange-500/20"
+              className="mr-3 w-9 h-9 rounded-xl bg-primary hover:bg-primary-hover text-white flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale active:scale-95 shadow-md shadow-primary/30"
             >
               <Send size={18} />
             </button>
           </form>
         </div>
         
-        <p className="text-center text-[10px] text-gray-400 mt-3 font-medium uppercase tracking-[0.1em]">
+        <p className="text-center text-[10px] text-brand-secondary mt-3 font-medium uppercase tracking-[0.1em]">
           Deal Intelligence Assistant • High Precision Extraction
         </p>
       </div>

@@ -78,8 +78,10 @@ export async function GET() {
       coAdvisory: profile.co_advisory === true,
       collaborationModels: profile.collaboration_model || [],
       profileAttachmentUrl: profile.profile_attachment_url,
+      profileImage: profile.profile_image,
       additionalInfo: profile.additional_info,
       profileCompletion: profile.profile_completion || 0,
+      tokens: profile.tokens,
     };
 
     return NextResponse.json(profileData);
@@ -138,37 +140,58 @@ export async function POST(req: NextRequest) {
       shouldShowSuccess = true;
     }
 
-    const finalTokens = (currentUser.tokens || 0) + tokenIncrement;
+    const finalTokens = (currentUser.tokens ?? 0) + tokenIncrement;
 
-    // 3. Normalize & Map Data to DB
+    console.log("[PROFILE API] Incoming profile_image:", body.profileImage || body.profile_image);
+
+    // 3. Build update object (Snake Case)
     const updateData = {
-      name: body.fullName,
-      email: body.workEmail || email,
-      phone: body.phone,
-      firm_name: body.firmName,
-      role: body.role,
-      custom_role: body.customRole,
-      category: body.professionalCategory,
-      custom_category: body.customCategory,
-      base_city: body.baseCity,
-      base_country: body.baseCountry,
-      base_location: `${body.baseCity}, ${body.baseCountry}`,
-      geographies: body.activeGeographies,
-      cross_border: body.crossBorder,
-      corridors: body.corridors,
-      sectors: body.primarySectors,
-      intent: body.currentFocus,
-      expertise_description: body.expertiseDescription,
-      active_mandates: body.activeMandates,
-      priority_sectors: body.primarySectors, // Using primary sectors as priority for now
-      co_advisory: body.coAdvisory,
-      collaboration_model: body.collaborationModels,
-      profile_attachment_url: body.attachmentUrl || currentUser.profile_attachment_url,
-      additional_info: body.additionalInfo,
+      name: body.fullName || currentUser.name,
+      email: body.workEmail || currentUser.email,
+      phone: body.phone || currentUser.phone,
+      firm_name: body.firmName || currentUser.firm_name,
+      role: body.role || currentUser.role,
+      custom_role: body.customRole || currentUser.custom_role,
+      category: body.professionalCategory || currentUser.category,
+      custom_category: body.customCategory || currentUser.custom_category,
+      base_city: body.baseCity || currentUser.base_city,
+      base_country: body.baseCountry || currentUser.base_country,
+      base_location: (body.baseCity && body.baseCountry) ? `${body.baseCity}, ${body.baseCountry}` : currentUser.base_location,
+      geographies: body.activeGeographies || currentUser.geographies,
+      cross_border: body.crossBorder !== undefined ? body.crossBorder : currentUser.cross_border,
+      corridors: body.corridors || currentUser.corridors,
+      sectors: body.primarySectors || currentUser.sectors,
+      intent: body.currentFocus || currentUser.intent,
+      expertise_description: body.expertiseDescription || currentUser.expertise_description,
+      active_mandates: body.activeMandates || currentUser.active_mandates,
+      priority_sectors: body.primarySectors || currentUser.priority_sectors,
+      co_advisory: body.coAdvisory !== undefined ? body.coAdvisory : currentUser.co_advisory,
+      collaboration_model: body.collaborationModels || currentUser.collaboration_model,
+      profile_attachment_url: body.attachmentUrl || body.profile_attachment_url || currentUser.profile_attachment_url,
+      additional_info: body.additionalInfo || currentUser.additional_info,
       profile_completion: progress,
       profile_completed_once: currentUser.profile_completed_once || (progress === 100),
-      tokens: finalTokens,
+      tokens: (body.tokens !== undefined && body.tokens !== null) ? body.tokens : finalTokens,
+      // STRICT: Only update profile_image if a value is provided in the request
+      // and it is NOT a Google avatar URL (Google avatars are fallbacks, not DB values)
+      profile_image: (() => {
+        const incoming = (body.profileImage !== undefined && body.profileImage !== null) 
+          ? body.profileImage 
+          : (body.profile_image !== undefined && body.profile_image !== null)
+            ? body.profile_image
+            : null;
+        
+        if (incoming && incoming.includes('googleusercontent.com')) {
+          console.log('[PROFILE API] REJECTING GOOGLE URL FOR profile_image:', incoming);
+          return currentUser.profile_image;
+        }
+        
+        return incoming || currentUser.profile_image;
+      })(),
     };
+
+    console.log('[PROFILE API] Final DB value for profile_image:', updateData.profile_image);
+    console.log('[PROFILE API] Updating user with data:', updateData);
 
     // 4. Store in DB
     const { error: updateError } = await supabase

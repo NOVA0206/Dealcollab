@@ -119,6 +119,8 @@ export interface ProfileFormData {
   customRole: string;
   professionalCategory: string[];
   customCategory: string;
+  avatarFile: File | null;
+  profileImage: string;
 
   // Section 2: Geography & Coverage
   baseCity: string;
@@ -148,6 +150,11 @@ export interface ProfileFormData {
 
   // Section 8: Additional Information
   additionalInfo: string;
+
+  // Metadata / Tokens / DB Aliases
+  tokens?: number;
+  profile_image?: string | null;
+  profile_attachment_url?: string | null;
 }
 
 export const INITIAL_FORM_DATA: ProfileFormData = {
@@ -159,6 +166,8 @@ export const INITIAL_FORM_DATA: ProfileFormData = {
   customRole: '',
   professionalCategory: [],
   customCategory: '',
+  avatarFile: null,
+  profileImage: '',
   baseCity: '',
   baseCountry: '',
   activeGeographies: [],

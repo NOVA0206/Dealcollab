@@ -41,21 +41,20 @@ const AuthContent = () => {
   // 2. State Machine for Auth Steps & Redirects
   useEffect(() => {
     if (status === 'authenticated' && session?.user) {
-      queueMicrotask(() => {
-        // @ts-expect-error - session.user is extended with custom DB boolean fields
-        const hasPhone = !!session.user.phone;
-        
-        if (!hasPhone) {
-          setStep('phone');
-        } else {
-          setStep('verified');
-          // Smooth transition to dashboard after successful phone capture
-          setTimeout(() => {
-            router.refresh();
-            router.push('/home');
-          }, 2000); // 2 second delay to show the success state
-        }
-      });
+      // @ts-expect-error - session.user is extended with custom DB boolean fields
+      const hasPhone = !!session.user.phone;
+      
+      if (!hasPhone) {
+        setStep('phone');
+      } else {
+        setStep('verified');
+        // Smooth transition to dashboard after successful phone capture
+        const timer = setTimeout(() => {
+          router.refresh();
+          router.push('/home');
+        }, 2000); // 2 second delay to show the success state
+        return () => clearTimeout(timer);
+      }
     }
   }, [status, session, router]);
 
@@ -106,11 +105,11 @@ const AuthContent = () => {
 
           {/* Feedback Banners */}
           {error && (
-            <div className="mb-6 p-4 bg-orange-50 border border-orange-100 rounded-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-500">
-               <div className="bg-orange-500/10 p-1.5 rounded-lg text-orange-600">
+            <div className="mb-6 p-4 bg-primary-soft border border-border rounded-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-500">
+               <div className="bg-primary/20 p-1.5 rounded-lg text-primary-hover">
                   <AlertCircle size={18} />
                </div>
-               <p className="text-sm font-bold text-orange-700 leading-tight">
+               <p className="text-sm font-bold text-foreground leading-tight">
                   {error === 'phone_linked_to_other' 
                     ? 'Security Rule: Number linked to another account' 
                     : 'Session update failed. Please retry.'}
@@ -131,25 +130,25 @@ const AuthContent = () => {
           {step === 'google' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <div className="space-y-2 text-center pb-2">
-                <h2 className="text-2xl font-black text-[#1F2937] tracking-tight italic">
-                  WELCOME <span className="text-[#F97316]">BACK</span>
+                <h2 className="text-2xl font-black text-foreground tracking-tight italic">
+                  WELCOME <span className="text-primary-hover">BACK</span>
                 </h2>
-                <p className="text-sm text-gray-400 font-medium tracking-tight">
+                <p className="text-sm text-brand-secondary font-medium tracking-tight">
                   Institutional Access & Verified Deal Flow
                 </p>
               </div>
 
               {/* WhatsApp Smart Entry Badge */}
               {isFromWhatsApp && whatsappVerifiedPhone && (
-                <div className="bg-[#F97316]/5 border border-[#F97316]/10 p-4 rounded-2xl flex items-center gap-4 mb-6 animate-in fade-in zoom-in duration-700 ring-1 ring-[#F97316]/20">
-                  <div className="bg-[#F97316] text-white p-2 rounded-xl shadow-lg shadow-[#F97316]/20">
+                <div className="bg-primary/5 border border-primary/10 p-4 rounded-2xl flex items-center gap-4 mb-6 animate-in fade-in zoom-in duration-700 ring-1 ring-primary/20">
+                  <div className="bg-primary text-white p-2 rounded-xl shadow-lg shadow-primary/30">
                     <MessageSquare size={16} />
                   </div>
                   <div>
-                    <p className="text-[10px] font-black text-[#F97316] uppercase tracking-widest leading-none mb-1.5">
+                    <p className="text-[10px] font-black text-primary-hover uppercase tracking-widest leading-none mb-1.5">
                       Verified Trust Layer
                     </p>
-                    <p className="text-xs font-bold text-gray-600">
+                    <p className="text-xs font-bold text-brand-secondary">
                       Welcome back — identified via WhatsApp
                     </p>
                   </div>
@@ -167,14 +166,14 @@ const AuthContent = () => {
                 </p>
               </div>
 
-              <div className="pt-6 text-center border-t border-gray-50">
-                <div className="flex items-center justify-center gap-2 text-gray-400 mb-1">
-                  <Info size={12} className="text-[#F97316]" />
+              <div className="pt-6 text-center border-t border-border">
+                <div className="flex items-center justify-center gap-2 text-brand-secondary mb-1">
+                  <Info size={12} className="text-primary-hover" />
                   <p className="text-[10px] font-medium italic">Private Beta Access Only</p>
                 </div>
                 <a 
                   href="mailto:support@dealcollab.in" 
-                  className="text-[10px] font-bold text-gray-500 hover:text-[#F97316] transition-colors underline decoration-gray-200 underline-offset-4"
+                  className="text-[10px] font-bold text-brand-secondary hover:text-primary-hover transition-colors underline decoration-border underline-offset-4"
                 >
                   Contact Membership Support
                 </a>
@@ -214,7 +213,7 @@ const AuthContent = () => {
         {/* Footer Meta */}
         <div className="flex justify-center gap-8 text-[10px] font-black text-white/30 uppercase tracking-[0.3em] animate-in fade-in duration-1000 delay-700">
            <div className="flex items-center gap-2">
-             <Sparkles size={12} className="text-[#F97316]" />
+             <Sparkles size={12} className="text-primary" />
              <span>AI Verified</span>
            </div>
            <span className="opacity-20">|</span>
@@ -229,7 +228,7 @@ export default function AuthPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-4">
-        <div className="w-10 h-10 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Securing Connection</p>
       </div>
     }>

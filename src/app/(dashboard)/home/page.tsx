@@ -78,21 +78,21 @@ export default function Home() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full relative bg-white overflow-hidden">
+    <div className="flex-1 flex flex-col h-full relative bg-background overflow-hidden">
       {/* Scrollable Message Area */}
-      <div className="flex-1 overflow-y-auto bg-white">
+      <div className="flex-1 overflow-y-auto bg-background">
         <div className="chat-container-max px-6 py-10 pb-40">
           {loading ? (
             <div className="max-w-3xl mx-auto">
                 <ChatSkeleton />
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center opacity-60">
-              <div className="w-16 h-16 rounded-2xl bg-orange-100 flex items-center justify-center mb-6 border border-orange-200">
-                <Plus size={32} className="text-orange-500" />
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-primary-soft flex items-center justify-center mb-6 border border-border">
+                <Plus size={32} className="text-primary-hover" />
               </div>
               <h2 className="text-2xl font-bold text-foreground mb-2 tracking-tight">Start a new conversation</h2>
-              <p className="text-gray-500 text-sm max-w-xs">Describe your deal, mandate, or project to begin extraction.</p>
+              <p className="text-brand-secondary text-sm max-w-xs">Describe your deal, mandate, or project to begin extraction.</p>
             </div>
           ) : (
             <div className="space-y-6">

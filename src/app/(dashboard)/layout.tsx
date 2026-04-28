@@ -15,18 +15,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = React.useState(false);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      setMounted(true);
-    });
+    setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (mounted) {
-      if (status === 'unauthenticated') {
-        router.push('/');
-      }
+    if (mounted && status === 'unauthenticated') {
+      router.replace('/');
     }
-  }, [mounted, status, session, router]);
+  }, [mounted, status, router]);
 
   // Prevent hydration mismatch by rendering null on the server and first client pass
   if (!mounted || status === 'loading') {

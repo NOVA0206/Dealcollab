@@ -31,9 +31,12 @@ export interface UserProfile {
   co_advisory: boolean;
   collaboration_model: string[] | null;
   profile_attachment_url: string | null;
+  profile_image: string | null;
   additional_info: string | null;
   // Mapped/Alias fields used in frontend
   fullName?: string | null;
+  profileImage?: string | null;
+  userAvatar?: string | null;
   firmName?: string | null;
   customRole?: string | null;
   customCategory?: string | null;
@@ -51,7 +54,7 @@ export interface UserProfile {
 }
 
 interface UserContextType {
-  tokens: number;
+  tokens: number | null;
   approvedDeals: number[];
   isEOIApproved: (dealId: number) => boolean;
   approveEOI: (dealId: number) => void;
@@ -59,6 +62,7 @@ interface UserContextType {
   isAuthenticated: boolean;
   login: () => void;
   logout: (reason?: 'session_expired' | 'link_expired') => void;
+  refreshProfile: () => Promise<void>;
   onboarding: {
     phoneVerified: boolean;
     profileCompleted: boolean;
@@ -89,7 +93,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const [supabase] = useState(() => createSupabaseClient());
   
-  const [tokens, setTokens] = useState(0);
+  const [tokens, setTokens] = useState<number | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [approvedDeals, setApprovedDeals] = useState<number[]>([]);
   const isAuthenticated = status === 'authenticated';
@@ -111,61 +115,80 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     additional: 0,
   });
 
+  const fetchSupabaseData = useCallback(async () => {
+    if (!supabase) {
+      setGlobalError("Supabase configuration is missing. Please check your .env file.");
+      return;
+    }
+    const userEmail = session?.user?.email?.trim().toLowerCase();
+    if (!userEmail) return;
+
+    console.log("FETCHING PROFILE DATA FROM API FOR:", userEmail);
+    console.log('[ProfileStepper] SUBMITTING PROFILE DATA:', {
+      profile_image_source: profile?.profileImage,
+      is_google_url: profile?.profileImage?.includes('googleusercontent.com')
+    });
+    
+    const response = await fetch('/api/profile');
+    if (!response.ok) {
+      console.error("FAILED TO FETCH PROFILE FROM API");
+      return;
+    }
+    
+    const data = await response.json();
+    
+    if (data) {
+      const dbTokens = data.tokens ?? data.profile?.tokens ?? 0;
+      console.log("SYNCING TOKENS TO UI:", dbTokens);
+      
+      setTokens(dbTokens); 
+      
+      const rawDbImage = data.profile_image || data.profileImage;
+      // STRICT REJECTION: If DB value is a Google URL, ignore it (it shouldn't be there)
+      const dbProfileImage = (rawDbImage && rawDbImage.includes('googleusercontent.com')) ? null : rawDbImage;
+      const authImage = session?.user?.image;
+      
+      // UI Avatar Priority: 1. DB image, 2. Auth provider image
+      const userAvatar = dbProfileImage || authImage || null;
+
+      setProfile({
+        ...data,
+        fullName: data.name || data.fullName,
+        firmName: data.firmName || data.firm_name,
+        customRole: data.customRole || data.custom_role,
+        customCategory: data.customCategory || data.custom_category,
+        baseLocation: data.baseLocation || data.base_location,
+        baseCity: data.baseCity || data.base_city,
+        baseCountry: data.baseCountry || data.base_country,
+        crossBorder: data.crossBorder ?? data.cross_border,
+        expertiseDescription: data.expertiseDescription || data.expertise_description,
+        activeMandates: data.activeMandates || data.active_mandates,
+        profileAttachmentUrl: data.profileAttachmentUrl || data.profile_attachment_url,
+        profileImage: dbProfileImage || null, // STRICT: Only DB value
+        userAvatar: userAvatar, // UI fallback
+        additionalInfo: data.additionalInfo || data.additional_info,
+        profileCompletion: data.profileCompletion || data.profile_completion,
+        tokens: dbTokens,
+      });
+      
+      setOnboardingState(prev => ({
+        phoneVerified: !!(data.is_phone_verified || data.phone),
+        profileCompleted: (data.profileCompletion || data.profile_completion || 0) >= 100,
+        dealSubmitted: prev.dealSubmitted,
+      }));
+    }
+  }, [session, supabase]);
+
   // Sync with Supabase (REAL DATA)
   useEffect(() => {
-    async function fetchSupabaseData() {
-      if (!supabase) {
-        setGlobalError("Supabase configuration is missing. Please check your .env file.");
-        return;
-      }
-      const userEmail = session?.user?.email?.trim().toLowerCase();
-      if (!userEmail) return;
-
-      console.log("FETCHING SUPABASE DATA FOR EMAIL:", userEmail);
-      
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .ilike("email", userEmail)
-        .maybeSingle();
-
-      console.log("SUPABASE FETCH RESULT:", data);
-
-      if (error) {
-        console.error("SUPABASE ERROR:", error);
-        return;
-      }
-
-      if (data) {
-        setTokens(data.tokens || 0);
-        setProfile({
-          ...data,
-          fullName: data.name,
-          firmName: data.firm_name,
-          customRole: data.custom_role,
-          customCategory: data.custom_category,
-          baseLocation: data.base_location,
-          baseCity: data.base_city,
-          baseCountry: data.base_country,
-          crossBorder: data.cross_border,
-          expertiseDescription: data.expertise_description,
-          activeMandates: data.active_mandates,
-          profileAttachmentUrl: data.profile_attachment_url,
-          additionalInfo: data.additional_info,
-          profileCompletion: data.profile_completion,
-        });
-        setOnboardingState(prev => ({
-          phoneVerified: data.is_phone_verified === true || String(data.is_phone_verified) === 'true',
-          profileCompleted: (data.profile_completion || 0) >= 100,
-          dealSubmitted: prev.dealSubmitted,
-        }));
-      }
-    }
-
     if (status === 'authenticated') {
-      fetchSupabaseData();
+      // Use a fire-and-forget pattern to avoid synchronous state-update warnings
+      // while maintaining the async fetch integrity
+      (async () => {
+        await fetchSupabaseData();
+      })();
     }
-  }, [status, session, supabase]);
+  }, [status, fetchSupabaseData]);
 
   const login = useCallback(() => {
     // Auth is managed by NextAuth status
@@ -209,7 +232,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const approveEOI = useCallback(async (dealId: number) => {
     if (approvedDeals.includes(dealId)) return;
-    if (tokens < 50) {
+    if ((tokens ?? 0) < 50) {
       addNotification({
         type: 'error',
         message: 'Insufficient tokens to connect with this deal.',
@@ -254,7 +277,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const addTokens = useCallback((amount: number) => {
     // Note: Tokens are actually added via the Profile API now for rewards
-    setTokens(prev => prev + amount);
+    setTokens(prev => (prev ?? 0) + amount);
     addNotification({
       type: 'tokens_credited',
       message: `${amount} tokens added to your account.`,
@@ -262,7 +285,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
   }, [addNotification]);
 
-  const canSendEOI = (status === 'authenticated' ? tokens : 0) > 0;
+  const canSendEOI = (status === 'authenticated' ? (tokens ?? 0) : 0) > 0;
 
   return (
     <UserContext.Provider value={{ 
@@ -275,6 +298,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated, 
       login, 
       logout,
+      refreshProfile: fetchSupabaseData,
       onboarding: status === 'authenticated' ? onboarding : {
         phoneVerified: false,
         profileCompleted: false,

@@ -1,20 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  --background: #FFFFFF;
-  --foreground: #1F2937;
+  --primary: #FFA000;
+  --primary-hover: #e69500;
+  --primary-soft: #FFF6E5;
+  --background: #FFFBF5;
+  --border: #FFE4B5;
+  --foreground: #2D241E;
 }
 
 @theme inline {
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
   --color-background: var(--background);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
-  --color-brand-sidebar: #F3F4F6;
-  --color-brand-card: #F9FAFB;
-  --color-brand-secondary: #6B7280;
-  --color-brand-accent: #F97316;
-  --color-brand-accent-glow: rgba(249,115,22,0.1);
-  --color-brand-accent-hover: #EA580C;
-  --color-brand-border: #E5E7EB;
+  
+  --color-brand-sidebar: var(--primary-soft);
+  --color-brand-card: #FFFFFF;
+  --color-brand-secondary: #8B7E74;
+  --color-brand-accent: var(--primary);
+  --color-brand-accent-glow: rgba(255, 213, 128, 0.2);
+  --color-brand-accent-hover: var(--primary-hover);
+  --color-brand-border: var(--border);
 
   @keyframes slide-in-top {
     from { transform: translateY(-1rem); opacity: 0; }
@@ -27,9 +36,9 @@
   }
 
   @keyframes glow-pulse {
-    0% { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.2)); }
-    50% { filter: drop-shadow(0 0 25px rgba(249, 115, 22, 0.5)); }
-    100% { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.2)); }
+    0% { filter: drop-shadow(0 0 10px rgba(255, 213, 128, 0.2)); }
+    50% { filter: drop-shadow(0 0 25px rgba(255, 213, 128, 0.5)); }
+    100% { filter: drop-shadow(0 0 10px rgba(255, 213, 128, 0.2)); }
   }
 }
 
@@ -55,7 +64,7 @@ body {
 
 .input-underline {
   border: none !important;
-  border-bottom: 2px solid #ff4d4f !important;
+  border-bottom: 2px solid var(--border) !important;
   background: transparent !important;
   border-radius: 0 !important;
   transition: border-color 0.2s ease;
@@ -63,7 +72,7 @@ body {
 
 .input-underline:focus {
   outline: none;
-  border-bottom-color: #ff6a00;
+  border-bottom-color: var(--primary) !important;
 }
 
 .scrollbar-hide {

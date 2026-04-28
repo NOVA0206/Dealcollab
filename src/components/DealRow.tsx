@@ -16,10 +16,10 @@ interface DealRowProps {
 
 export default function DealRow({ deal, onDelete }: DealRowProps) {
   return (
-    <div className="grid grid-cols-12 items-center p-4 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg hover:bg-gray-50 transition-all gap-4 mb-3">
+    <div className="grid grid-cols-12 items-center p-4 bg-primary-soft border border-border rounded-lg hover:bg-primary/10 transition-all gap-4 mb-3">
       {/* Proposed Deals (Name) */}
       <div className="col-span-6 sm:col-span-8">
-        <span className="text-[15px] font-semibold text-[#1F2937]">
+        <span className="text-[15px] font-semibold text-foreground">
           {deal.name}
         </span>
       </div>

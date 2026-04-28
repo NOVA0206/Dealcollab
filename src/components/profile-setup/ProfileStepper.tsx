@@ -34,6 +34,7 @@ import StepCard from './StepCard';
 import AnimatedStepWrapper from './AnimatedStepWrapper';
 import TagInput from './TagInput';
 import FileUpload from './FileUpload';
+import AvatarUpload from './AvatarUpload';
 
 interface ProfileStepperProps {
   onComplete: (showSuccess?: boolean) => void;
@@ -41,18 +42,20 @@ interface ProfileStepperProps {
 }
 
 export default function ProfileStepper({ onComplete, initialData }: ProfileStepperProps) {
-  const { updateReadiness, setOnboarding, addTokens } = useUser();
+  const { updateReadiness, setOnboarding, addTokens, refreshProfile } = useUser();
   const { data: session } = useSession();
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<ProfileFormData>(INITIAL_FORM_DATA);
   const [direction, setDirection] = useState<'next' | 'back'>('next');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const hasHydrated = useRef(false);
+  const dbHydrated = useRef(false);
+  const sessionHydrated = useRef(false);
 
   // Initialize form with initialData or session
   useEffect(() => {
-    if (initialData && !hasHydrated.current) {
-      hasHydrated.current = true;
+    // Priority 1: Hydrate from Database (initialData)
+    if (initialData && !dbHydrated.current) {
+      dbHydrated.current = true;
       setFormData(prev => ({
         ...prev,
         fullName: initialData.fullName || initialData.name || '',
@@ -75,10 +78,13 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         coAdvisory: initialData.coAdvisory || initialData.co_advisory || false,
         collaborationModels: initialData.collaborationModels || initialData.collaboration_model || [],
         attachmentUrl: initialData.profileAttachmentUrl || initialData.profile_attachment_url || '',
+        profileImage: initialData.profileImage || initialData.profile_image || '',
         additionalInfo: initialData.additionalInfo || initialData.additional_info || '',
       }));
-    } else if (session?.user && !hasHydrated.current) {
-      hasHydrated.current = true;
+    } 
+    // Priority 2: Fallback to Session (if DB not yet hydrated)
+    else if (session?.user && !dbHydrated.current && !sessionHydrated.current) {
+      sessionHydrated.current = true;
       setFormData(prev => ({
         ...prev,
         fullName: session.user?.name || '',
@@ -141,17 +147,61 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
         attachmentUrl = publicUrl;
       }
 
-      const { attachmentFile: _unused, ...submitData } = formData;
+      // 2. Handle Avatar Upload if present
+      let finalProfileImage = formData.profileImage;
+      
+      if (formData.avatarFile) {
+        const { createSupabaseClient } = await import('@/utils/supabase/client');
+        const supabase = createSupabaseClient();
+        if (!supabase) throw new Error('Could not initialize storage client');
+
+        const signedRes = await fetch(`/api/profile/upload/signed-url?file=${encodeURIComponent(formData.avatarFile.name)}&type=${encodeURIComponent(formData.avatarFile.type)}&bucket=avatars`);
+        const { uploadUrl, path, error: signedError } = await signedRes.json();
+        if (!signedRes.ok) throw new Error(signedError || 'Failed to get avatar upload permission');
+
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: formData.avatarFile,
+          headers: { 'Content-Type': formData.avatarFile.type }
+        });
+        if (!uploadRes.ok) throw new Error('Avatar upload failed');
+
+        // Use the supabase client to get the public URL safely
+        const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
+        finalProfileImage = urlData.publicUrl;
+        console.log("Uploaded Image URL:", finalProfileImage);
+      }
+
+      const { attachmentFile: _unused, avatarFile: _unused2, profileImage: _old, ...submitData } = formData;
       void _unused;
+      void _unused2;
+      void _old;
+      
+      console.log('[ProfileStepper] SUBMITTING PROFILE DATA:', {
+        profile_image: finalProfileImage,
+        is_google_url: finalProfileImage?.includes('googleusercontent.com')
+      });
       
       const response = await fetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...submitData, attachmentUrl }),
+        body: JSON.stringify({ 
+          ...submitData, 
+          attachmentUrl, 
+          profileImage: finalProfileImage // Ensure we use the NEW one
+        }),
       });
       const result = await response.json();
       
       if (!response.ok) throw new Error(result.errors?.[0]?.message || 'Submission failed');
+
+      // CRITICAL: Refresh global profile state to show new avatar
+      await refreshProfile();
+      
+      console.log('[ProfileStepper] Submission successful. Profile refreshed.', {
+        profile_image_saved: finalProfileImage,
+        response: result
+      });
 
       // Update local state and rewards
       updateReadiness('identity', 20);
@@ -241,35 +291,45 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
             <AnimatedStepWrapper direction={direction} isActive={currentStep === 1}>
               <StepCard title="Basic Identity" helper="Establish your professional identity within the network">
                 <div className="space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <AvatarUpload 
+                    file={formData.avatarFile}
+                    existingUrl={formData.profileImage}
+                    onFileSelect={(file) => updateFormData({ avatarFile: file })}
+                  />
+
+                  <div className="grid grid-cols-1 gap-6">
                     <InputGroup label="Full Name">
-                      <input type="text" value={formData.fullName} onChange={e => updateFormData({ fullName: e.target.value })} className="input-underline" placeholder="Legal Name" />
+                      <input type="text" value={formData.fullName} onChange={e => updateFormData({ fullName: e.target.value })} className="input-premium" placeholder="Legal Name" />
                     </InputGroup>
-                    <InputGroup label="Work Email">
-                      <input type="email" value={formData.workEmail} onChange={e => updateFormData({ workEmail: e.target.value })} className="input-underline" placeholder="name@firm.com" />
-                    </InputGroup>
-                    <InputGroup label="Phone Number">
-                      <input type="tel" value={formData.phone} onChange={e => updateFormData({ phone: e.target.value })} className="input-underline" placeholder="+1 (555) 000-0000" />
-                    </InputGroup>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <InputGroup label="Work Email">
+                        <input type="email" value={formData.workEmail} onChange={e => updateFormData({ workEmail: e.target.value })} className="input-premium" placeholder="name@firm.com" />
+                      </InputGroup>
+                      <InputGroup label="Phone Number">
+                        <input type="tel" value={formData.phone} onChange={e => updateFormData({ phone: e.target.value })} className="input-premium" placeholder="+91 00000 00000" />
+                      </InputGroup>
+                    </div>
+
                     <InputGroup label="Firm / Organization Name (Optional)">
-                      <input type="text" value={formData.firmName} onChange={e => updateFormData({ firmName: e.target.value })} className="input-underline" placeholder="Company Name" />
+                      <input type="text" value={formData.firmName} onChange={e => updateFormData({ firmName: e.target.value })} className="input-premium" placeholder="Company Name" />
                     </InputGroup>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <InputGroup label="Your Role">
+                        <select value={formData.role} onChange={e => updateFormData({ role: e.target.value })} className="input-premium cursor-pointer">
+                          <option value="">Select your role</option>
+                          {ROLE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                      </InputGroup>
+                      {formData.role === 'Other' && (
+                        <InputGroup label="Specify Role">
+                          <input type="text" value={formData.customRole} onChange={e => updateFormData({ customRole: e.target.value })} className="input-premium" placeholder="Enter your role" />
+                        </InputGroup>
+                      )}
+                    </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <InputGroup label="Your Role">
-                      <select value={formData.role} onChange={e => updateFormData({ role: e.target.value })} className="input-underline cursor-pointer">
-                        <option value="">Select your role</option>
-                        {ROLE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                      </select>
-                    </InputGroup>
-                    {formData.role === 'Other' && (
-                      <InputGroup label="Specify Role">
-                        <input type="text" value={formData.customRole} onChange={e => updateFormData({ customRole: e.target.value })} className="input-underline" placeholder="Enter your role" />
-                      </InputGroup>
-                    )}
-                  </div>
-
                   <div className="space-y-6">
                     <MultiSelectChips 
                       label="Professional Category"
@@ -280,7 +340,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                     />
                     {formData.professionalCategory.includes("Other") && (
                       <InputGroup label="Specify Category">
-                        <input type="text" value={formData.customCategory} onChange={e => updateFormData({ customCategory: e.target.value })} className="input-underline" placeholder="Your specific professional title" />
+                        <input type="text" value={formData.customCategory} onChange={e => updateFormData({ customCategory: e.target.value })} className="input-premium" placeholder="Your specific professional title" />
                       </InputGroup>
                     )}
                   </div>
@@ -292,13 +352,15 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
             <AnimatedStepWrapper direction={direction} isActive={currentStep === 2}>
               <StepCard title="Geography & Coverage" helper="Define your operational deal-making jurisdictions">
                 <div className="space-y-10">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <InputGroup label="City">
-                      <input type="text" value={formData.baseCity} onChange={e => updateFormData({ baseCity: e.target.value })} className="input-underline" placeholder="e.g. Dubai" />
-                    </InputGroup>
-                    <InputGroup label="Country">
-                      <input type="text" value={formData.baseCountry} onChange={e => updateFormData({ baseCountry: e.target.value })} className="input-underline" placeholder="e.g. UAE" />
-                    </InputGroup>
+                  <div className="grid grid-cols-1 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <InputGroup label="City">
+                        <input type="text" value={formData.baseCity} onChange={e => updateFormData({ baseCity: e.target.value })} className="input-premium" placeholder="e.g. Dubai" />
+                      </InputGroup>
+                      <InputGroup label="Country">
+                        <input type="text" value={formData.baseCountry} onChange={e => updateFormData({ baseCountry: e.target.value })} className="input-premium" placeholder="e.g. UAE" />
+                      </InputGroup>
+                    </div>
                   </div>
 
                   <MultiSelectChips 
@@ -340,7 +402,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                       />
                       {formData.corridors.includes('Other') && (
                         <InputGroup label="Specify Corridor">
-                          <input type="text" value={formData.customCorridor} onChange={e => updateFormData({ customCorridor: e.target.value })} className="input-underline" placeholder="e.g. India ↔ Germany" />
+                          <input type="text" value={formData.customCorridor} onChange={e => updateFormData({ customCorridor: e.target.value })} className="input-premium" placeholder="e.g. India ↔ Germany" />
                         </InputGroup>
                       )}
                     </div>
@@ -380,7 +442,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                       value={formData.expertiseDescription} 
                       onChange={e => updateFormData({ expertiseDescription: e.target.value })} 
                       rows={6} 
-                      className="input-underline pt-8 resize-none" 
+                      className="textarea-premium" 
                       placeholder="Minimum 60 characters..." 
                     />
                     <div className="flex justify-between mt-1 px-1">
@@ -460,7 +522,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
                     value={formData.additionalInfo} 
                     onChange={e => updateFormData({ additionalInfo: e.target.value })} 
                     rows={8} 
-                    className="input-underline pt-8 resize-none" 
+                    className="textarea-premium" 
                     placeholder="Types of deals, typical size, strategic focus..." 
                   />
                 </InputGroup>
@@ -491,18 +553,51 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
       </div>
 
       <style jsx global>{`
-        .input-underline {
-          @apply w-full bg-transparent border-0 border-b-2 border-[#ff4d4f] rounded-none px-0 py-3 text-sm font-semibold transition-all outline-none;
-          @apply focus:border-[#ff6a00] focus:ring-0;
-          @apply placeholder:text-gray-300;
+        .input-premium {
+          width: 100%;
+          background-color: #fffaf3;
+          border: 1px solid #FFE4B5;
+          border-radius: 16px;
+          padding: 1rem 1.25rem;
+          font-size: 0.875rem;
+          font-weight: 700;
+          transition: all 0.2s;
+          outline: none;
         }
-        select.input-underline {
-          @apply appearance-none;
+        .input-premium:focus {
+          border-color: #FFA000;
+          box-shadow: 0 0 0 4px rgba(255, 160, 0, 0.1);
         }
-        .toggle-switch { @apply w-14 h-8 rounded-full bg-gray-200 transition-all relative; }
-        .toggle-switch.active { @apply bg-brand-accent; }
-        .toggle-knob { @apply absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-all shadow-sm; }
-        .toggle-switch.active .toggle-knob { @apply left-7; }
+        .input-premium::placeholder {
+          color: #FFE4B5;
+        }
+        .textarea-premium {
+          width: 100% !important;
+          background-color: #fffaf3;
+          border: 1px solid #FFE4B5;
+          border-radius: 16px;
+          padding: 1rem 1.25rem;
+          font-size: 0.875rem;
+          font-weight: 700;
+          transition: all 0.2s;
+          outline: none;
+          resize: none;
+          min-height: 120px;
+        }
+        .textarea-premium:focus {
+          border-color: #FFA000;
+          box-shadow: 0 0 0 4px rgba(255, 160, 0, 0.1);
+        }
+        .textarea-premium::placeholder {
+          color: #FFE4B5;
+        }
+        select.input-premium {
+          appearance: none;
+        }
+        .toggle-switch { width: 3.5rem; height: 2rem; border-radius: 9999px; background-color: #e5e7eb; transition: all 0.2s; position: relative; }
+        .toggle-switch.active { background-color: #FFA000; }
+        .toggle-knob { position: absolute; top: 0.25rem; left: 0.25rem; width: 1.5rem; height: 1.5rem; background-color: white; border-radius: 9999px; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .toggle-switch.active .toggle-knob { left: 1.75rem; }
       `}</style>
     </div>
   );

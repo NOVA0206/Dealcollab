@@ -19,7 +19,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isStandalonePage = pathname?.includes('/eoi-review');
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-white font-sans antialiased text-foreground overflow-y-auto md:overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen bg-background font-sans antialiased text-foreground overflow-y-auto md:overflow-hidden">
       
       {/* Mobile Backdrop Overlay */}
       {isMobileSidebarOpen && (
@@ -28,25 +28,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           onClick={() => setIsMobileSidebarOpen(false)}
         />
       )}
-
+ 
       {/* Sidebar - Desktop (Fixed/Collapsed) & Mobile (Slide-in) */}
       {!isStandalonePage && (
         <div 
           className={`
-            fixed md:relative z-[100] h-full bg-white transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
+            fixed md:relative z-[100] h-full bg-primary-soft transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
             ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
             ${isSidebarCollapsed ? 'md:w-[80px]' : 'md:w-[260px]'}
-            w-[280px] md:w-auto shrink-0 border-r border-gray-100
+            w-[280px] md:w-auto shrink-0 border-r border-border
           `}
         >
           {/* Mobile Close Button */}
           <button 
             onClick={() => setIsMobileSidebarOpen(false)}
-            className="md:hidden absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-xl hover:bg-gray-50 active:scale-95 transition-all z-[110]"
+            className="md:hidden absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-xl hover:bg-primary/10 active:scale-95 transition-all z-[110]"
           >
-            <X size={20} className="text-gray-500" />
+            <X size={20} className="text-brand-secondary" />
           </button>
-
+ 
           <Sidebar 
             isCollapsed={isSidebarCollapsed} 
             onItemClick={() => setIsMobileSidebarOpen(false)}
@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       )}
       
-      <div className="flex-1 flex flex-col relative h-full bg-white">
+      <div className="flex-1 flex flex-col relative h-full bg-background">
         
         {/* Mobile Navbar */}
         {!isStandalonePage && (
@@ -63,23 +63,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             onNewChat={createNewChat}
           />
         )}
-
+ 
         {/* Desktop Header (Profile & Tokens) */}
         {!isStandalonePage && (
           <div className="hidden md:flex absolute top-6 right-8 z-50 items-center gap-3">
             <Link 
               href="/profile/tokens"
-              className="flex items-center gap-2 px-4 py-2 bg-orange-50 border border-orange-100 rounded-full transition-all hover:bg-orange-100 group shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-primary-soft border border-border rounded-full transition-all hover:bg-primary/20 group shadow-sm"
             >
-              <Coins size={14} className="text-orange-500" />
-              <span className="text-xs font-bold text-orange-600">{tokens} Tokens</span>
+              <Coins size={14} className="text-primary-hover" />
+              <span className="text-xs font-bold text-foreground">
+                {typeof tokens === 'number' ? tokens : '...'} Tokens
+              </span>
             </Link>
             <ProfileDropdown />
           </div>
         )}
         
         {/* Main Content Area */}
-        <main className="flex-1 flex flex-col w-full h-full relative overflow-y-auto bg-white">
+        <main className="flex-1 flex flex-col w-full h-full relative overflow-y-auto bg-background">
           {children}
         </main>
       </div>

@@ -5,6 +5,20 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   images: {
     formats: ['image/avif', 'image/webp'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'qnxeyhdtrjdlqtjgwmnx.supabase.co',
+        port: '',
+        pathname: '/storage/v1/object/public/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+        port: '',
+        pathname: '**',
+      },
+    ],
   },
   // Optimizations for Vercel / Production build
   compiler: {

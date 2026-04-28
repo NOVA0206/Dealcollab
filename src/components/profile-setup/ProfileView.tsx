@@ -18,8 +18,12 @@ export default function ProfileView({ data, onEdit }: ProfileViewProps) {
       {/* Header Card */}
       <div className="bg-white rounded-[32px] p-8 border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-6">
-          <div className="w-20 h-20 bg-brand-accent/5 rounded-3xl flex items-center justify-center text-brand-accent">
-            <User size={40} />
+          <div className="w-20 h-20 bg-brand-accent/5 rounded-3xl flex items-center justify-center text-brand-accent overflow-hidden relative">
+            {data.profileImage ? (
+              <img src={data.profileImage} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <User size={40} />
+            )}
           </div>
           <div>
             <h1 className="text-3xl font-black text-foreground tracking-tight">{data.fullName || data.name}</h1>

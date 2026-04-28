@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const fileName = searchParams.get('file');
   const fileType = searchParams.get('type');
+  const bucket = searchParams.get('bucket') || 'profile-attachments';
 
   if (!fileName || !fileType) {
     return NextResponse.json({ error: 'File name and type are required' }, { status: 400 });
@@ -23,16 +24,29 @@ export async function GET(req: NextRequest) {
 
   const email = session.user.email.trim().toLowerCase();
   const safeFolder = email.replace(/[^a-z0-9]/g, '_');
-  const ext = fileName.split('.').pop() || 'pdf';
+  const ext = fileName.split('.').pop() || (fileType.split('/')[1]) || 'bin';
   const path = `${safeFolder}/${Date.now()}.${ext}`;
 
   // Create a signed URL for uploading (valid for 5 minutes)
   const { data, error } = await supabase.storage
-    .from('profile-attachments')
+    .from(bucket)
     .createSignedUploadUrl(path);
 
   if (error) {
     console.error('Error creating signed upload URL:', error);
+    
+    // Check if it's a "bucket not found" error
+    const isNotFound = error.message?.includes('not found') || 
+                       error.message?.includes('does not exist') || 
+                       (error as any).status === 404 || 
+                       (error as any).status === 400;
+
+    if (isNotFound) {
+      return NextResponse.json({ 
+        error: `Storage bucket '${bucket}' does not exist. Please create it in your Supabase dashboard or run the setup migration.` 
+      }, { status: 500 });
+    }
+
     return NextResponse.json({ error: 'Could not generate upload permission' }, { status: 500 });
   }
 

@@ -13,6 +13,7 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   emailVerified: timestamp('email_verified', { mode: 'date' }),
   image: text('image'),
+  profile_image: text('profile_image'),
   phone: text('phone'),
   isPhoneVerified: boolean('is_phone_verified').default(false),
   profileCompletedOnce: boolean('profile_completed_once').default(false),

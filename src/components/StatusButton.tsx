@@ -30,7 +30,7 @@ export default function StatusButton({ status, isOpen, onClick }: StatusButtonPr
         className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-all duration-200 active:scale-[0.98] hover:scale-[1.02] hover:brightness-105 ${
           isMatched 
             ? 'bg-green-50 text-green-600 border-green-100 hover:bg-green-100' 
-            : 'bg-[#F97316]/10 text-[#F97316] border-[#F97316]/20 hover:bg-[#F97316]/20'
+            : 'bg-primary-soft text-primary-hover border-primary/20 hover:bg-primary/20'
         }`}
       >
         <span>{status}</span>
@@ -49,17 +49,17 @@ export default function StatusButton({ status, isOpen, onClick }: StatusButtonPr
     case 'Send EOI':
       if (!canSendEOI) {
         label = 'Insufficient Tokens';
-        colorClass = 'bg-[#F3F4F6] text-[#9CA3AF] cursor-not-allowed border-gray-200';
+        colorClass = 'bg-primary-soft text-brand-secondary/40 cursor-not-allowed border-border';
         isClickable = false;
         showLock = true;
       } else {
-        colorClass = 'bg-[#F97316] text-white hover:bg-[#EA580C] cursor-pointer';
+        colorClass = 'bg-primary text-white hover:bg-primary-hover cursor-pointer shadow-md shadow-primary/30';
       }
       break;
 
     case 'EOI Sent — Awaiting Approval':
       label = 'Awaiting Approval';
-      colorClass = 'bg-[#F3F4F6] text-[#6B7280] cursor-not-allowed border border-gray-100';
+      colorClass = 'bg-primary-soft text-brand-secondary cursor-not-allowed border border-border opacity-70';
       isClickable = false;
       break;
 
@@ -81,7 +81,7 @@ export default function StatusButton({ status, isOpen, onClick }: StatusButtonPr
 
     case 'EOI Received':
       label = 'Review Proposal';
-      colorClass = 'bg-[#F97316] text-white hover:bg-[#EA580C] cursor-pointer shadow-[0_4px_15px_rgba(249,115,22,0.2)] ring-2 ring-[#F97316]/20';
+      colorClass = 'bg-primary text-white hover:bg-primary-hover cursor-pointer shadow-[0_4px_15px_rgba(255,160,0,0.3)] ring-2 ring-primary/20';
       isClickable = true;
       break;
 
@@ -110,7 +110,7 @@ export default function StatusButton({ status, isOpen, onClick }: StatusButtonPr
       {status === 'Send EOI' && !canSendEOI && (
         <a 
           href="/profile/billing" 
-          className="text-[10px] font-bold text-[#F97316] hover:underline"
+          className="text-[10px] font-bold text-primary-hover hover:underline"
         >
           Buy Tokens →
         </a>

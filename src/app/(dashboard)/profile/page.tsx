@@ -1,51 +1,29 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useUser } from '@/components/UserProvider';
 import { Sparkles, Loader2 } from 'lucide-react';
 import ProfileStepper from '@/components/profile-setup/ProfileStepper';
-import { UserProfile } from '@/components/UserProvider';
 import ProfileView from '@/components/profile-setup/ProfileView';
 import ProfileSuccessScreen from '@/components/profile-setup/ProfileSuccessScreen';
 
 export default function ProfilePage() {
-   const { onboarding } = useUser();
-   const [profileData, setProfileData] = useState<UserProfile | null>(null);
-   const [loading, setLoading] = useState(true);
+   const { profile, onboarding } = useUser();
    const [isEditing, setIsEditing] = useState(false);
    const [showSuccess, setShowSuccess] = useState(false);
-
-   const fetchProfile = useCallback(async () => {
-      try {
-         const res = await fetch('/api/profile');
-         const data = await res.json();
-         setProfileData(data);
-      } catch (err) {
-         console.error('Failed to fetch profile:', err);
-      } finally {
-         setLoading(false);
-      }
-   }, []);
-
-   useEffect(() => {
-      queueMicrotask(() => {
-         fetchProfile();
-      });
-   }, [fetchProfile]);
 
    const handleComplete = (shouldShowSuccess?: boolean) => {
       setIsEditing(false);
       if (shouldShowSuccess) {
          setShowSuccess(true);
       }
-      fetchProfile();
    };
 
-   if (loading) {
+   if (!profile) {
       return (
          <div className="flex-1 flex items-center justify-center bg-[#F9FAFB]">
             <div className="flex flex-col items-center gap-4">
-               <Loader2 className="w-10 h-10 text-brand-accent animate-spin" />
-               <p className="text-sm font-bold text-brand-secondary uppercase tracking-widest">Loading Deal Intelligence...</p>
+               <Loader2 className="w-10 h-10 text-[#FFA000] animate-spin" />
+               <p className="text-sm font-bold text-brand-secondary uppercase tracking-widest">Loading Profile...</p>
             </div>
          </div>
       );
@@ -66,7 +44,7 @@ export default function ProfilePage() {
             <div className="w-full bg-gray-50/50">
                <ProfileStepper 
                   onComplete={handleComplete} 
-                  initialData={profileData}
+                  initialData={profile}
                />
             </div>
          </div>
@@ -88,7 +66,7 @@ export default function ProfilePage() {
                </div>
                <ProfileStepper 
                   onComplete={handleComplete} 
-                  initialData={profileData} 
+                  initialData={profile} 
                />
             </div>
          ) : (
@@ -96,7 +74,7 @@ export default function ProfilePage() {
                <HeroSection />
                <div className="w-full bg-gray-50/50">
                   <ProfileView 
-                     data={profileData} 
+                     data={profile} 
                      onEdit={() => setIsEditing(true)} 
                   />
                </div>

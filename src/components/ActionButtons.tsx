@@ -39,7 +39,7 @@ export default function ActionButtons({ onView, onConnect, onDelete, label, vari
           e.stopPropagation();
           onView?.();
         }}
-        className="px-3 py-1.5 text-xs font-bold text-[#6B7280] hover:text-[#1F2937] hover:bg-gray-50 border border-[#E5E7EB] rounded-lg transition-all"
+        className="px-3 py-1.5 text-xs font-bold text-brand-secondary hover:text-foreground hover:bg-primary-soft border border-border rounded-lg transition-all"
       >
         View {label}
       </button>
@@ -48,7 +48,7 @@ export default function ActionButtons({ onView, onConnect, onDelete, label, vari
           e.stopPropagation();
           onConnect?.();
         }}
-        className="px-3 py-1.5 text-xs font-bold text-white bg-[#F97316] hover:bg-[#EA580C] rounded-lg shadow-sm transition-all"
+        className="px-3 py-1.5 text-xs font-bold text-white bg-primary hover:bg-primary-hover rounded-lg shadow-sm transition-all"
       >
         Connect {label}
       </button>

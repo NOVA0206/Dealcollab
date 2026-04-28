@@ -25,7 +25,7 @@ export default function DashboardRow({ item, onEOIClick }: DashboardRowProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const handleStatusClick = () => {
-    const isIncoming = item.status === ('EOI Received' as any);
+    const isIncoming = item.status === 'EOI Received';
     
     if (item.status === 'Approved' || isIncoming) {
       setIsExpanded(!isExpanded);
@@ -39,10 +39,10 @@ export default function DashboardRow({ item, onEOIClick }: DashboardRowProps) {
   return (
     <div className={`flex flex-col border transition-all duration-300 rounded-2xl shadow-sm ${
       isExpanded 
-        ? 'border-[#F97316]/30 bg-white ring-1 ring-[#F97316]/5' 
+        ? 'border-primary/50 bg-white ring-1 ring-primary/10' 
         : isIncoming
-          ? 'bg-white border-[#F97316]/30 ring-1 ring-[#F97316]/10 shadow-[0_4px_20px_rgba(249,115,22,0.05)]'
-          : 'bg-[#F9FAFB] border-[#E5E7EB] hover:bg-white hover:border-brand-accent/20'
+          ? 'bg-white border-primary/40 ring-1 ring-primary/20 shadow-[0_4px_20px_rgba(255,213,128,0.1)]'
+          : 'bg-primary-soft/30 border-border hover:bg-white hover:border-primary/40'
     }`}>
       <div className="grid grid-cols-1 sm:grid-cols-12 items-stretch gap-4 p-4">
         {/* YOUR DEAL */}
