@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, Suspense } from 'react';
+import React, { useState, Suspense, useEffect } from 'react';
+import { useSession } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 import { useUser } from '@/components/UserProvider';
 import VideoBackground from '@/components/auth/VideoBackground';
@@ -19,19 +20,38 @@ function AuthContent() {
 
   const [step, setStep] = useState<'google' | 'phone' | 'verified'>('google');
   const [isLoading, setIsLoading] = useState(false);
+  const { status, data: session } = useSession();
 
-  const handleGoogleSuccess = () => {
+  // Onboarding logic: If authenticated but missing phone, skip to phone step
+  useEffect(() => {
+    if (status === 'authenticated' && step === 'google') {
+      interface CustomUser { phone?: string };
+      const hasPhone = (session?.user as CustomUser)?.phone;
+      
+      Promise.resolve().then(() => {
+        if (!hasPhone) {
+          setStep('phone');
+        } else {
+          setStep('verified');
+          const timer = setTimeout(() => {
+            window.location.href = '/home';
+          }, 800);
+          return () => clearTimeout(timer);
+        }
+      });
+    }
+  }, [status, session, step]);
+
+  const handleGoogleSuccess = async () => {
     setIsLoading(true);
+    const { signIn } = await import('next-auth/react');
     
-    // Fast simulated check
-    setTimeout(() => {
-      setIsLoading(false);
-      if (isFromWhatsApp) {
-        handleFinalAuth();
-      } else {
-        setStep('phone');
-      }
-    }, 1200);
+    // In production, we trigger the real NextAuth flow
+    // If it's from WhatsApp, we ensure the source is passed so callbacks can handle it
+    await signIn('google', { 
+      callbackUrl: isFromWhatsApp ? '/home?source=whatsapp' : '/home',
+      redirect: true 
+    });
   };
 
   const handlePhoneSuccess = () => {

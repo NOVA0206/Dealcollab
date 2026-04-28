@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { Smartphone, Send, ShieldCheck, ArrowLeft, AlertCircle, PhoneCall, MessageSquare } from 'lucide-react';
+import { useSession } from 'next-auth/react';
 
 interface PhoneVerificationProps {
   onVerify: () => void;
@@ -13,6 +14,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
   const [phone, setPhone] = useState(initialPhone || '');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { update } = useSession();
 
   const handleSubmit = async (e: React.FormEvent, method: 'whatsapp' | 'call' | 'manual' = 'manual') => {
     e.preventDefault();
@@ -38,6 +40,8 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
       const data = await res.json();
       
       if (data.success || res.ok) {
+        // Update session so it includes the new phone
+        await update();
         onVerify(); // Move to the next step
       } else {
         setError(data.error || "Failed to save phone number");

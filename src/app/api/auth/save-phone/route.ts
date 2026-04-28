@@ -6,7 +6,7 @@ import { auth } from '@/auth';
 
 export async function POST(req: Request) {
   try {
-    const { phone, verificationMethod = 'manual' } = await req.json();
+    const { phone } = await req.json();
 
     if (!phone || phone.length < 10) {
       return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
