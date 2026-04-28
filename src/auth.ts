@@ -51,6 +51,7 @@ adapter.createUser = async (user) => {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter,
   ...authConfig,
+  trustHost: true,
   providers: [
     ...authConfig.providers,
     Credentials({

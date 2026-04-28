@@ -139,7 +139,8 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
 
         <div className="space-y-3 pt-2">
           <button
-            onClick={(e) => handleSubmit(e, 'manual')}
+            type="button"
+            onClick={(e) => handleSubmit(e as any, 'manual')}
             disabled={isLoading || !phone}
             className="w-full bg-[#1F2937] text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#F97316] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all shadow-xl hover:shadow-[#F97316]/20 disabled:opacity-50 group"
           >
@@ -153,9 +154,9 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
             )}
           </button>
 
-          <div className="grid grid-cols-2 gap-3 pt-2">
              <button
-                onClick={(e) => handleSubmit(e, 'whatsapp')}
+                type="button"
+                onClick={(e) => handleSubmit(e as any, 'whatsapp')}
                 disabled={isLoading || !phone}
                 className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-green-50 hover:border-green-200 hover:text-green-700 active:scale-[0.98] transition-all disabled:opacity-50"
               >
@@ -163,7 +164,8 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
                 Confirm via WhatsApp
              </button>
              <button
-                onClick={(e) => handleSubmit(e, 'call')}
+                type="button"
+                onClick={(e) => handleSubmit(e as any, 'call')}
                 disabled={isLoading || !phone}
                 className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 active:scale-[0.98] transition-all disabled:opacity-50"
               >

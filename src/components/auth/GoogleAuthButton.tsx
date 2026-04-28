@@ -9,6 +9,7 @@ interface GoogleAuthButtonProps {
 export default function GoogleAuthButton({ onClick, isLoading }: GoogleAuthButtonProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={isLoading}
       className="w-full bg-white text-[#1F2937] py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 border border-[#E5E7EB] hover:bg-gray-50 transition-all active:scale-[0.98] shadow-sm hover:shadow-md disabled:opacity-70 disabled:cursor-not-allowed group relative overflow-hidden"
