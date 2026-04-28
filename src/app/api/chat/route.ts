@@ -13,7 +13,8 @@ import Groq from 'groq-sdk';
 export const runtime = "nodejs";
 export const dynamic = 'force-dynamic';
 
-const MODEL = "llama3-70b-8192"; // Hardened production model
+const MODEL = "llama-3.1-8b-instant"; // Primary model
+const FALLBACK_MODEL = "mixtral-8x7b-32768"; // Fallback model
 const SYSTEM_PROMPT = `
 You are a high-performance Deal Intelligence Assistant.
 Your goal is to extract structured deal data from a conversation.
@@ -69,8 +70,9 @@ export async function POST(req: NextRequest) {
     throw new Error("GROQ_API_KEY not found in runtime");
   }
   const apiKey = process.env.GROQ_API_KEY;
+  console.log("PRIMARY MODEL:", MODEL);
+  console.log("FALLBACK MODEL:", FALLBACK_MODEL);
   console.log("KEY EXISTS:", !!apiKey);
-  console.log("MODEL USED:", "llama3-70b-8192");
 
   try {
     const session = await auth();
@@ -116,10 +118,11 @@ export async function POST(req: NextRequest) {
     const maxAttempts = 2;
 
     while (attempts < maxAttempts) {
+      const currentModel = attempts === 0 ? MODEL : FALLBACK_MODEL;
       try {
-        console.log(`AI: Processing with Groq (Attempt ${attempts + 1})...`);
+        console.log(`Using model: ${currentModel} (Attempt ${attempts + 1})`);
         const aiResponse = await groq.chat.completions.create({
-          model: "llama3-70b-8192",
+          model: currentModel,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             ...formattedHistory
@@ -138,7 +141,7 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         attempts++;
         if (attempts >= maxAttempts) throw err;
-        console.warn(`AI: Retry ${attempts} after error:`, (err as Error).message);
+        console.warn(`AI: Switching to fallback after error with ${currentModel}:`, (err as Error).message);
         await new Promise(resolve => setTimeout(resolve, 500)); // Short backoff
       }
     }
