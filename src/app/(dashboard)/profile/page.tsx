@@ -1,5 +1,6 @@
 'use client';
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useUser } from '@/components/UserProvider';
 import { Sparkles, Loader2 } from 'lucide-react';
 import ProfileStepper from '@/components/profile-setup/ProfileStepper';
@@ -7,6 +8,7 @@ import ProfileView from '@/components/profile-setup/ProfileView';
 import ProfileSuccessScreen from '@/components/profile-setup/ProfileSuccessScreen';
 
 export default function ProfilePage() {
+   const router = useRouter();
    const { profile, onboarding } = useUser();
    const [isEditing, setIsEditing] = useState(false);
    const [showSuccess, setShowSuccess] = useState(false);
@@ -31,8 +33,7 @@ export default function ProfilePage() {
 
    if (showSuccess) {
       return <ProfileSuccessScreen onDashboardClick={() => {
-         setShowSuccess(false);
-         setIsEditing(false);
+         router.push('/deal-dashboard');
       }} />;
    }
 

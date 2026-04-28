@@ -114,7 +114,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
   };
 
   const handleNext = async () => {
-    if (currentStep < TOTAL_STEPS) {
+    if (currentStep < TOTAL_STEPS && progress < 100) {
       setDirection('next');
       setCurrentStep(prev => prev + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -573,7 +573,7 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
 
           <button onClick={handleNext} disabled={!isValid || isSubmitting} className={`flex items-center gap-4 px-12 py-4 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all ${isValid ? 'bg-[#0B1B2B] text-white hover:bg-brand-accent' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
             {isSubmitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 
-             currentStep === TOTAL_STEPS ? <>Finalize Profile <Zap size={16} className="fill-white" /></> : <>Next Step <ChevronRight size={18} /></>}
+             (currentStep === TOTAL_STEPS || progress === 100) ? <>Finalize Profile <Zap size={16} className="fill-white" /></> : <>Next Step <ChevronRight size={18} /></>}
           </button>
         </div>
       </div>
