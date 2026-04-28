@@ -64,17 +64,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   // 1. HARD ENVIRONMENT VALIDATION
-  const apiKey = process.env.GROQ_API_KEY;
-  console.log("GROQ MODEL USED:", MODEL);
-  console.log("API KEY EXISTS:", !!apiKey);
-
-  if (!apiKey) {
-    console.error("❌ CRITICAL: Missing GROQ_API_KEY in environment variables");
-    return NextResponse.json({
-      success: false,
-      error: "Missing GROQ_API_KEY in environment variables"
-    }, { status: 500 });
+  if (!process.env.GROQ_API_KEY) {
+    console.error("❌ CRITICAL: Missing GROQ_API_KEY");
+    throw new Error("GROQ_API_KEY not found in runtime");
   }
+  const apiKey = process.env.GROQ_API_KEY;
+  console.log("KEY EXISTS:", !!apiKey);
+  console.log("MODEL USED:", "llama3-70b-8192");
 
   try {
     const session = await auth();
@@ -110,7 +106,9 @@ export async function POST(req: NextRequest) {
     }));
 
     // 3. GROQ CLIENT INITIALIZATION (INSIDE HANDLER ONLY)
-    const groq = new Groq({ apiKey });
+    const groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
     
     // 4. AI CALL WITH RETRY LOGIC
     let aiContent = "";
@@ -121,19 +119,21 @@ export async function POST(req: NextRequest) {
       try {
         console.log(`AI: Processing with Groq (Attempt ${attempts + 1})...`);
         const aiResponse = await groq.chat.completions.create({
-          model: MODEL,
+          model: "llama3-70b-8192",
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             ...formattedHistory
           ],
-          temperature: 0.3, // PRD standard
+          temperature: 0.3,
           response_format: { type: "json_object" }
         });
 
+        console.log("RAW RESPONSE:", JSON.stringify(aiResponse));
         aiContent = aiResponse?.choices?.[0]?.message?.content || "";
-        console.log("AI RESPONSE RECEIVED:", !!aiContent);
         
-        if (!aiContent) throw new Error("Empty AI response");
+        if (!aiContent) {
+          throw new Error("Empty response from Groq");
+        }
         break; // Success
       } catch (err) {
         attempts++;
@@ -189,24 +189,21 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
+      data: aiContent, // Step 8: Explicitly return raw content as 'data'
       message: extraction.message,
-      data: extraction.data,
       is_complete: extraction.is_complete,
       chatId: activeChatId
     });
 
-  } catch (error: unknown) {
-    const err = error as Error;
-    console.error("🔥 AI SYSTEM FAILURE:", err);
-    console.error("🔥 MESSAGE:", err?.message);
-    console.error("🔥 STACK:", err?.stack);
+  } catch (error: any) {
+    console.error("🔥 REAL ERROR:", error);
 
-    return NextResponse.json({ 
-      success: false, 
-      error: "AI temporarily unavailable",
-      debug: err.message
+    return Response.json({
+      success: false,
+      error: error.message,
+      stack: error.stack
     }, { status: 500 });
   }
 }
