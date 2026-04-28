@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'qnxeyhdtrjdlqtjgwmnx.supabase.co',
+        hostname: '*.supabase.co',
         port: '',
         pathname: '/storage/v1/object/public/**',
       },
@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
   },
   // Optimizations for Vercel / Production build
   compiler: {
-    removeConsole: process.env.NODE_ENV === 'production',
+    removeConsole: false, // Disabled for debugging audit logs
   },
   // Setting the tracing root can help avoid scanning outside the project
   outputFileTracingRoot: process.cwd(),
