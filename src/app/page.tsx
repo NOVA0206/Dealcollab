@@ -43,31 +43,37 @@ const AuthContent = () => {
     }
   }, [isFromWhatsApp, phoneFromUrl]);
 
+  const redirectStarted = React.useRef(false);
+
   // 2. State Machine for Auth Steps & Redirects
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || status !== 'authenticated' || !session?.user) return;
     
-    if (status === 'authenticated' && session?.user) {
-      // Step 1: Check both session and DB profile for phone
-      // @ts-expect-error - custom property
-      const sessionPhone = session.user.phone;
-      const dbPhone = profile?.phone;
-      const isPhoneVerified = onboarding.phoneVerified || !!sessionPhone || !!dbPhone;
+    // Step 1: Check both session and DB profile for phone
+    // @ts-expect-error - custom property
+    const sessionPhone = session.user.phone;
+    const dbPhone = profile?.phone;
+    const isPhoneVerified = onboarding.phoneVerified || !!sessionPhone || !!dbPhone;
 
-      console.log("Onboarding Check:", { isPhoneVerified, sessionPhone, dbPhone });
+    console.log("Onboarding Check:", { isPhoneVerified, sessionPhone, dbPhone, step });
+    
+    if (!isPhoneVerified) {
+      if (step !== 'phone') {
+        setStep('phone');
+      }
+    } else {
+      if (step !== 'verified') {
+        setStep('verified');
+      }
       
-      if (!isPhoneVerified) {
-        if (step !== 'phone') {
-          setStep('phone');
-        }
-      } else {
-        if (step !== 'verified') {
-          setStep('verified');
-          const timer = setTimeout(() => {
-            router.push('/home');
-          }, 800); 
-          return () => clearTimeout(timer);
-        }
+      // Handle redirect if not already started
+      if (!redirectStarted.current) {
+        redirectStarted.current = true;
+        console.log("REDIRECTING TO HOME...");
+        const timer = setTimeout(() => {
+          router.push('/home');
+        }, 800); 
+        return () => clearTimeout(timer);
       }
     }
   }, [mounted, status, session, profile, onboarding.phoneVerified, step, router]);
