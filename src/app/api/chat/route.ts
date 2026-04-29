@@ -1,9 +1,10 @@
 import { auth } from '@/auth';
 import { db } from '@/db';
-import { chatMessages, chatSessions, deals, mandates } from '@/db/schema';
+import { chatMessages, chatSessions } from '@/db/schema';
 import { asc, desc, eq } from 'drizzle-orm';
 import Groq from 'groq-sdk';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/utils/supabase/server';
 
 /**
  * 🎯 HARDENED PRODUCTION CHAT SYSTEM (v4.0)
@@ -93,20 +94,33 @@ export async function POST(req: NextRequest) {
     if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 });
 
     // 2. SESSION & MESSAGE PERSISTENCE
+    const supabase = createServerSupabaseClient();
+    if (!supabase) throw new Error("Supabase client failed to initialize");
+
     let activeChatId = chatId;
     if (!activeChatId) {
-      const [newSession] = await db.insert(chatSessions).values({
-        userId: session.user.id,
-        title: message.slice(0, 30) + (message.length > 30 ? "..." : "")
-      }).returning();
+      const { data: newSession, error: sessionErr } = await supabase
+        .from("chat_sessions")
+        .insert([{
+          user_id: session.user.id,
+          title: message.slice(0, 30) + (message.length > 30 ? "..." : "")
+        }])
+        .select()
+        .single();
+        
+      if (sessionErr) throw sessionErr;
       activeChatId = newSession.id;
     }
 
-    await db.insert(chatMessages).values({
-      chatId: activeChatId,
-      role: 'user',
-      content: message,
-    });
+    const { error: msgErr } = await supabase
+      .from("chat_messages")
+      .insert([{
+        chat_id: activeChatId,
+        role: 'user',
+        content: message,
+      }]);
+      
+    if (msgErr) throw msgErr;
 
     const history = await db.query.chatMessages.findMany({
       where: eq(chatMessages.chatId, activeChatId),
@@ -203,11 +217,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 6. PERSIST ASSISTANT RESPONSE (FULL JSON FOR MEMORY)
-    await db.insert(chatMessages).values({
-      chatId: activeChatId,
-      role: 'assistant',
-      content: JSON.stringify(extraction),
-    });
+    const { error: assistantMsgErr } = await supabase
+      .from("chat_messages")
+      .insert([{
+        chat_id: activeChatId,
+        role: 'assistant',
+        content: JSON.stringify(extraction),
+      }]);
+      
+    if (assistantMsgErr) throw assistantMsgErr;
 
     // 7. DEAL EXTRACTION LOGIC & PERSISTENCE
     const d = extraction.data;
@@ -225,40 +243,46 @@ export async function POST(req: NextRequest) {
       console.log("✅ DATA COMPLETE - INSERTING INTO DB");
       try {
         // Step 3: Insert into Mandates
-        await db.insert(mandates).values({
-          userId: session.user.id,
-          rawText: message,
-          normalisedText: JSON.stringify(d),
-          intent: d.intent,
-          sectors: d.sectors,
-          geographies: d.geographies,
-          dealSizeMinCr: d.deal_size_min_cr?.toString(),
-          dealSizeMaxCr: d.deal_size_max_cr?.toString(),
-          revenueMinCr: d.revenue_min_cr?.toString(),
-          revenueMaxCr: d.revenue_max_cr?.toString(),
-          dealStructure: d.deal_structure,
-          specialConditions: d.special_conditions || [],
-          urgency: d.inferred_urgency || "Medium",
-          buyerType: d.inferred_buyer_type || "Strategic",
-          status: 'ACTIVE',
-          source: 'WEB',
-        });
+        const { error: mandateErr } = await supabase
+          .from("mandates")
+          .insert([{
+            user_id: session.user.id,
+            raw_text: message,
+            normalised_text: JSON.stringify(d),
+            intent: d.intent,
+            sectors: d.sectors,
+            geographies: d.geographies,
+            deal_size_min_cr: d.deal_size_min_cr?.toString(),
+            deal_size_max_cr: d.deal_size_max_cr?.toString(),
+            revenue_min_cr: d.revenue_min_cr?.toString(),
+            revenue_max_cr: d.revenue_max_cr?.toString(),
+            deal_structure: d.deal_structure,
+            special_conditions: d.special_conditions || [],
+            urgency: d.inferred_urgency || "Medium",
+            buyer_type: d.inferred_buyer_type || "Strategic",
+            status: 'ACTIVE',
+            source: 'WEB',
+          }]);
+
+        if (mandateErr) throw mandateErr;
 
         // Step 4: Insert into Deals
-        await db.insert(deals).values({
-          userId: session.user.id,
-          title: `${d.intent}: ${d.sectors.join(", ")} deal`,
-          sector: d.sectors.join(", "),
-          region: d.geographies.join(", "),
-          size: `${d.deal_size_min_cr}-${d.deal_size_max_cr} Cr`,
-          status: 'live', // Note: status is an enum [draft, live, paused, closed]
-        });
+        const { error: dealErr } = await supabase
+          .from("deals")
+          .insert([{
+            user_id: session.user.id,
+            title: `${d.intent}: ${d.sectors.join(", ")} deal`,
+            sector: d.sectors.join(", "),
+            region: d.geographies.join(", "),
+            size: `${d.deal_size_min_cr}-${d.deal_size_max_cr} Cr`,
+            status: 'live',
+          }]);
+
+        if (dealErr) throw dealErr;
 
         console.log("✅ DB INSERT SUCCESSFUL");
       } catch (dbErr) {
         console.error("❌ DB INSERT FAILED:", dbErr);
-        // We continue to return the AI message even if DB insert fails for UX, 
-        // but it's logged for investigation.
       }
     } else {
       console.log("⏳ DATA INCOMPLETE - WAITING FOR MORE DETAILS");
