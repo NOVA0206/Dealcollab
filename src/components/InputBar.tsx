@@ -10,6 +10,7 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
   const [inputValue, setInputValue] = useState('');
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -18,11 +19,15 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
       onSendMessage(inputValue, pendingFile);
       setInputValue('');
       setPendingFile(null);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
       handleSubmit();
     }
   };
@@ -60,24 +65,32 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
             <Plus size={22} />
           </button>
 
-          <form onSubmit={handleSubmit} className="flex-1 flex items-center">
-            <input 
-              type="text" 
+          <div className="flex-1 flex items-start pt-3">
+            <textarea 
+              ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask DealCollab AI anything..." 
-              className="flex-1 bg-transparent border-none outline-none text-foreground text-[16px] py-4 pr-4 placeholder:text-brand-secondary/60"
+              rows={1}
+              className="flex-1 bg-transparent border-none outline-none text-foreground text-[16px] py-1 px-0 pr-4 placeholder:text-brand-secondary/60 resize-none min-h-[24px] max-h-[200px] scrollbar-hide"
+              style={{ height: 'auto' }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = `${target.scrollHeight}px`;
+              }}
             />
             
             <button 
               type="submit"
+              onClick={handleSubmit}
               disabled={!inputValue.trim()}
-              className="mr-3 w-9 h-9 rounded-xl bg-primary hover:bg-primary-hover text-white flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale active:scale-95 shadow-md shadow-primary/30"
+              className="mr-3 mt-[-4px] w-9 h-9 rounded-xl bg-primary hover:bg-primary-hover text-white flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale active:scale-95 shadow-md shadow-primary/30 shrink-0"
             >
               <Send size={18} />
             </button>
-          </form>
+          </div>
         </div>
         
         <p className="text-center text-[10px] text-brand-secondary mt-3 font-medium uppercase tracking-[0.1em]">

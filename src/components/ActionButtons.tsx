@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { Eye, Link2, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 
 interface ActionButtonsProps {
   onView?: () => void;

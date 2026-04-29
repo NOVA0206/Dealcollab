@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import Image from 'next/image';
 import { 
   User, Globe, MapPin, Target, Zap, MessageSquare, Edit3, Briefcase, FileText
 } from 'lucide-react';
@@ -20,7 +21,13 @@ export default function ProfileView({ data, onEdit }: ProfileViewProps) {
         <div className="flex items-center gap-6">
           <div className="w-20 h-20 bg-brand-accent/5 rounded-3xl flex items-center justify-center text-brand-accent overflow-hidden relative">
             {data.profileImage ? (
-              <img src={data.profileImage} alt="Profile" className="w-full h-full object-cover" />
+              <Image 
+                src={data.profileImage} 
+                alt="Profile" 
+                className="object-cover" 
+                fill
+                sizes="80px"
+              />
             ) : (
               <User size={40} />
             )}

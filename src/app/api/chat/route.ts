@@ -17,41 +17,87 @@ export const dynamic = 'force-dynamic';
 const MODEL = "llama-3.1-8b-instant"; // Primary model
 const FALLBACK_MODEL = "mixtral-8x7b-32768"; // Fallback model
 const SYSTEM_PROMPT = `
-You are DealCollab AI — a high-intelligence Deal Advisor. You behave like a proactive M&A partner, not a passive respondent.
+You are the DealCollab Deal Intelligence Bot. You are a structured deal intelligence system, not a chatbot. 
+Your goal is to transform user inputs into high-quality mandates through a structured qualification engine.
 
-### 🎭 PERSONALITY & TONE
-- **Proactive & Guiding**: ALWAYS drive the conversation forward. Never give a dead-end response. Every message must end with a question or a clear next step.
-- **Human-Centric**: Acknowledge compliments or casual chat naturally, but always pivot back to helping them with their deal flow.
-- **Expertise**: Be professional, smart, and assertive in your guidance.
+### 🎭 BEHAVIOR RULES (STRICT)
+- Be PROFESSIONAL and SHARP. No casual tone, no "tell me more", no long explanations.
+- Ask in GROUPS (not single questions).
+- DO NOT repeat questions already answered.
+- DO NOT behave like a form; behave like an intelligent deal desk.
+- If data is missing, ask ONLY for missing fields in a single concise message.
+- MAX 2 follow-ups for missing data.
 
-### 🎯 INTERACTION RULES
-1. **GREETINGS (Hi, Hello)**: Greet them warmly and immediately ask a deal-related hook.
-   - Example: "Hello! I'm your Deal Advisor. Are you exploring any specific sectors for your next move, or should we look at what's trending?"
-2. **NO DEAD-ENDS**: If you've acknowledged a point, immediately ask about a missing parameter (Intent, Sector, Geography, or Size).
-3. **SMART FOLLOW-UPS**: If a user is vague, give them 2 options to choose from to keep the momentum.
-4. **NO REPETITION**: If you've asked about intent once and they haven't answered, try asking about their sector instead.
+### 🎯 FLOW ARCHITECTURE (MANDATORY)
+
+#### STEP 1: INTENT CLASSIFICATION
+Every user message must be mapped to one of these intents:
+- SELL_SIDE
+- BUY_SIDE
+- FUNDRAISING
+- DEBT
+- STRATEGIC_PARTNERSHIP
+- KNOWLEDGE
+
+#### STEP 2: CORE FIELD EXTRACTION (GROUPED)
+Once intent is identified, ask for these fields in ONE message:
+**For BUY SIDE:**
+- Target sector
+- Preferred geography
+- Investment / acquisition budget
+- Majority / minority / full acquisition
+- Strategic objective
+
+**For SELL SIDE / OTHERS:**
+- Sector
+- Geography
+- Revenue range
+- Business scale
+- Full sale or partial stake
+
+#### STEP 3: INDUSTRY-SPECIFIC INTELLIGENCE
+Once the sector is known, select 2–4 questions ONLY from the relevant framework:
+- **SaaS**: ARR/MRR, churn, enterprise vs SME, IP dependency.
+- **Pharma**: approvals, export markets, formulations/API, compliance.
+- **Manufacturing**: OEM / B2B, plant ownership, certifications, customer concentration.
+- **Others**: Ask 2-4 highly relevant professional questions for that specific sector.
+
+#### STEP 4: COMPLETION & FINAL RESPONSE
+When enough data is collected (Intent, Core Fields, and Sector Intelligence), set "is_complete": true.
+The message MUST be EXACTLY this:
+"Your requirement has been structured successfully.
+
+Your intent is secure and confidential with us.
+This is not deal distribution — this is deal resolution.
+
+I will work to identify the right counterparty for you, understand their intent, and present only relevant aligned opportunities to you.
+
+If the counterparty intent aligns with your mandate, and only after your approval, you will be connected.
+
+This is intelligence built on network over network — not just visible listings.
+
+I continuously work across the network to identify the right counterparty based on your mandate.
+
+As relevant opportunities align, you will be notified via email or WhatsApp.
+
+This process runs continuously, 24×7."
 
 ### ⚙️ EXTRACTION SCHEMA (CRITICAL)
-You MUST return JSON in every response. This data is used for matching.
+Return JSON ONLY:
 {
-  "data": {
-    "intent": "BUY_SIDE" | "SELL_SIDE" | "INVESTMENT" | null,
-    "sectors": string[],
-    "geographies": string[],
-    "deal_size_min_cr": number | null,
-    "deal_size_max_cr": number | null,
-    "deal_structure": string | null,
-    "revenue_min_cr": number | null,
-    "revenue_max_cr": number | null,
-    "special_conditions": string[]
+  "intent": "SELL_SIDE" | "BUY_SIDE" | "FUNDRAISING" | "DEBT" | "STRATEGIC_PARTNERSHIP" | "KNOWLEDGE" | null,
+  "state": {
+    "sector": string | null,
+    "geography": string | null,
+    "deal_size": string | null,
+    "revenue": string | null,
+    "structure": string | null,
+    "intent_focus": string | null,
+    "industry_data": object | null
   },
   "is_complete": boolean,
-  "message": "Your proactive, intelligent, 1-2 line conversational response here. MUST end with a question."
+  "message": "Your sharp, structured, grouped response or final completion message."
 }
-
-### 🏁 COMPLETION
-When Intent, Sector, Geography, and Size are collected, set is_complete: true and use this message:
-"Perfect — got everything I need. I’ll record this and start matching you with relevant opportunities."
 `;
 
 
@@ -212,12 +258,15 @@ export async function POST(req: NextRequest) {
     // --- MEMORY LOGIC: Reconstruct State from History ---
     let conversationData = {
       intent: null,
-      sectors: [],
-      geographies: [],
-      deal_size_min_cr: null,
-      deal_size_max_cr: null,
-      deal_structure: null,
-      special_conditions: []
+      state: {
+        sector: null,
+        geography: null,
+        deal_size: null,
+        revenue: null,
+        structure: null,
+        intent_focus: null,
+        industry_data: null
+      }
     };
 
     // Scan backwards for the latest state
@@ -225,9 +274,12 @@ export async function POST(req: NextRequest) {
       if (history[i].role === 'assistant') {
         try {
           const parsed = JSON.parse(history[i].content);
-          if (parsed.data) {
-            conversationData = { ...conversationData, ...parsed.data };
-            break; // Found latest state
+          if (parsed.state || parsed.intent) {
+            conversationData = {
+              intent: parsed.intent || conversationData.intent,
+              state: { ...conversationData.state, ...(parsed.state || {}) }
+            };
+            // If we found a state with many fields, we can stop, or continue to merge
           }
         } catch { continue; }
       }
@@ -316,44 +368,50 @@ ${SYSTEM_PROMPT}`;
     }
 
     // 7. DEAL EXTRACTION LOGIC & PERSISTENCE
-    const d = extraction.data;
-    const isComplete = 
-      d.intent && 
-      d.sectors?.length > 0 && 
-      d.geographies?.length > 0 && 
-      d.deal_size_min_cr !== null && 
-      d.deal_size_max_cr !== null && 
-      d.deal_structure;
+    const s = extraction.state;
+    const isComplete = extraction.is_complete;
 
-    console.log("🧠 FINAL DATA:", JSON.stringify(d));
+    console.log("🧠 FINAL DATA:", JSON.stringify(extraction));
 
     if (isComplete) {
       console.log("✅ DATA COMPLETE - INSERTING INTO DB");
       try {
+        // Parse deal size and revenue if they are strings like "10-50 Cr"
+        const parseRange = (val: string | null) => {
+          if (!val) return { min: null, max: null };
+          const matches = val.match(/(\d+)/g);
+          if (matches && matches.length >= 2) return { min: matches[0], max: matches[1] };
+          if (matches && matches.length === 1) return { min: matches[0], max: matches[0] };
+          return { min: null, max: null };
+        };
+
+        const size = parseRange(s.deal_size);
+        const revenue = parseRange(s.revenue);
+
         // Step 3: Insert into Mandates
         const { error: mandateErr } = await supabase
           .from("mandates")
           .insert([{
             user_id: userId,
             raw_text: message,
-            normalised_text: JSON.stringify(d),
-            intent: d.intent,
-            sectors: d.sectors,
-            geographies: d.geographies,
-            deal_size_min_cr: d.deal_size_min_cr?.toString(),
-            deal_size_max_cr: d.deal_size_max_cr?.toString(),
-            revenue_min_cr: d.revenue_min_cr?.toString(),
-            revenue_max_cr: d.revenue_max_cr?.toString(),
-            deal_structure: d.deal_structure,
-            special_conditions: d.special_conditions || [],
-            urgency: d.inferred_urgency || "Medium",
-            buyer_type: d.inferred_buyer_type || "Strategic",
+            normalised_text: JSON.stringify(extraction),
+            intent: extraction.intent,
+            sectors: s.sector ? [s.sector] : [],
+            geographies: s.geography ? [s.geography] : [],
+            deal_size_min_cr: size.min,
+            deal_size_max_cr: size.max,
+            revenue_min_cr: revenue.min,
+            revenue_max_cr: revenue.max,
+            deal_structure: s.structure,
+            special_conditions: s.industry_data ? [JSON.stringify(s.industry_data)] : [],
+            urgency: "Medium",
+            buyer_type: s.intent_focus || "Strategic",
             status: 'ACTIVE',
             source: 'WEB',
           }]);
 
         if (mandateErr) {
-          console.error("Supabase error:", mandateErr);
+          console.error("Supabase mandate error:", mandateErr);
           throw new Error(mandateErr.message);
         }
 
@@ -362,15 +420,15 @@ ${SYSTEM_PROMPT}`;
           .from("deals")
           .insert([{
             user_id: userId,
-            title: `${d.intent}: ${d.sectors.join(", ")} deal`,
-            sector: d.sectors.join(", "),
-            region: d.geographies.join(", "),
-            size: `${d.deal_size_min_cr}-${d.deal_size_max_cr} Cr`,
+            title: `${extraction.intent}: ${s.sector} deal`,
+            sector: s.sector,
+            region: s.geography,
+            size: s.deal_size || "Undisclosed",
             status: 'live',
           }]);
 
         if (dealErr) {
-          console.error("Supabase error:", dealErr);
+          console.error("Supabase deal error:", dealErr);
           throw new Error(dealErr.message);
         }
 
@@ -383,7 +441,22 @@ ${SYSTEM_PROMPT}`;
     }
 
     const finalMessage = isComplete 
-      ? "Perfect — got everything I need. I’ll record this and start matching you with relevant opportunities."
+      ? `Your requirement has been structured successfully.
+
+Your intent is secure and confidential with us.
+This is not deal distribution — this is deal resolution.
+
+I will work to identify the right counterparty for you, understand their intent, and present only relevant aligned opportunities to you.
+
+If the counterparty intent aligns with your mandate, and only after your approval, you will be connected.
+
+This is intelligence built on network over network — not just visible listings.
+
+I continuously work across the network to identify the right counterparty based on your mandate.
+
+As relevant opportunities align, you will be notified via email or WhatsApp.
+
+This process runs continuously, 24×7.`
       : extraction.message;
 
     return Response.json({
@@ -391,7 +464,8 @@ ${SYSTEM_PROMPT}`;
       data: aiContent,
       message: finalMessage,
       is_complete: isComplete,
-      chatId: activeChatId
+      chatId: activeChatId,
+      type: isComplete ? 'complete' : 'conversation'
     });
 
   } catch (error: unknown) {

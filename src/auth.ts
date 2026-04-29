@@ -16,8 +16,9 @@ const adapter = DrizzleAdapter(db, {
 });
 
 // Override createUser to support WhatsApp -> Google account linking
-const originalCreateUser = adapter.createUser!;
-adapter.createUser = async (user) => {
+const originalCreateUser = adapter.createUser;
+if (originalCreateUser) {
+  adapter.createUser = async (user) => {
   const cookieStore = await cookies();
   const whatsappPhone = cookieStore.get("whatsapp_phone")?.value;
 
@@ -45,8 +46,9 @@ adapter.createUser = async (user) => {
     }
   }
 
-  return originalCreateUser(user);
-};
+    return originalCreateUser(user);
+  };
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter,
