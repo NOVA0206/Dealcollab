@@ -97,6 +97,20 @@ export async function POST(req: NextRequest) {
     const supabase = createServerSupabaseClient();
     if (!supabase) throw new Error("Supabase client failed to initialize");
 
+    // ENSURE USER EXISTS (Production Fix for foreign key constraint)
+    console.log("User ID:", session.user.id);
+    const { error: upsertError } = await supabase
+      .from("users")
+      .upsert([{ 
+        id: session.user.id, 
+        email: session.user.email 
+      }], { onConflict: 'id' });
+      
+    if (upsertError) {
+      console.error("User upsert failed:", upsertError);
+      // We log but don't strictly block here as the user might already exist
+    }
+
     let activeChatId = chatId;
     if (!activeChatId) {
       const { data: newSession, error: sessionErr } = await supabase
