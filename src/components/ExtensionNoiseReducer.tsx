@@ -31,18 +31,18 @@ export function ExtensionNoiseReducer() {
     }
 
     // 2. Suppress console errors from extensions
-    const originalConsoleError = console.error;
-    console.error = (...args) => {
-      const msg = args[0]?.toString() || '';
-      if (
-        msg.includes('chrome-extension://') || 
-        msg.includes('MetaMask') ||
-        msg.includes('ethereum') ||
-        msg.includes('web3') ||
-        msg.includes('data-qb-installed')
-      ) return;
-      originalConsoleError.apply(console, args);
-    };
+    // const originalConsoleError = console.error;
+    // console.error = (...args) => {
+    //   const msg = args[0]?.toString() || '';
+    //   if (
+    //     msg.includes('chrome-extension://') || 
+    //     msg.includes('MetaMask') ||
+    //     msg.includes('ethereum') ||
+    //     msg.includes('web3') ||
+    //     msg.includes('data-qb-installed')
+    //   ) return;
+    //   originalConsoleError.apply(console, args);
+    // };
 
     // 3. Suppress unhandled rejections from extensions
     const handleRejection = (event: PromiseRejectionEvent) => {

@@ -70,6 +70,7 @@ export default function Home() {
       });
 
       const data = await response.json();
+      console.log("📡 API RESPONSE:", { status: response.status, ok: response.ok, data });
 
       if (!response.ok || data.success === false) {
         throw new Error(data.error || 'Failed to process deal');
@@ -93,10 +94,15 @@ export default function Home() {
         fetchSessions();
       }
     } catch (error: unknown) {
-      console.error("FULL ERROR:", error);
-      console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+      console.error("❌ CHAT ERROR:", error);
       
-      const errorMessage = error instanceof Error ? error.message : (typeof error === "string" ? error : JSON.stringify(error));
+      let errorMessage = "An unknown error occurred";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        console.error("STACK:", error.stack);
+      } else if (typeof error === "string") {
+        errorMessage = error;
+      }
       
       setMessages(prev => [...prev, {
         role: 'assistant' as const,

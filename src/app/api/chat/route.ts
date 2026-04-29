@@ -132,7 +132,24 @@ export async function POST(req: NextRequest) {
     console.log("Database User ID:", userId);
 
     let activeChatId = chatId;
+    console.log("Input chatId:", chatId);
+
+    // Verify session exists if chatId is provided
+    if (activeChatId) {
+      const { data: existingSession } = await supabase
+        .from("chat_sessions")
+        .select("id")
+        .eq("id", activeChatId)
+        .single();
+      
+      if (!existingSession) {
+        console.log("Provided chatId not found, resetting to null");
+        activeChatId = null;
+      }
+    }
+
     if (!activeChatId) {
+      console.log("Creating new chat session for user:", userId);
       const { data: newSession, error: sessionErr } = await supabase
         .from("chat_sessions")
         .insert([{
@@ -143,11 +160,13 @@ export async function POST(req: NextRequest) {
         .single();
         
       if (sessionErr) {
-        console.error("Supabase error:", sessionErr);
+        console.error("Supabase session error:", sessionErr);
         throw new Error(sessionErr.message);
       }
       activeChatId = newSession.id;
     }
+
+    console.log("Using activeChatId:", activeChatId);
 
     const { error: msgErr } = await supabase
       .from("chat_messages")
@@ -158,7 +177,7 @@ export async function POST(req: NextRequest) {
       }]);
       
     if (msgErr) {
-      console.error("Supabase error:", msgErr);
+      console.error("Supabase message error:", msgErr);
       throw new Error(msgErr.message);
     }
 
@@ -376,15 +395,23 @@ ${SYSTEM_PROMPT}`;
     });
 
   } catch (error: unknown) {
-    console.error("FULL ERROR:", error);
-    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    console.error("❌ CHAT ERROR:", error);
     
-    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    let errorMessage = "An unknown error occurred";
+    let errorStack = undefined;
+
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      errorStack = error.stack;
+      console.error("STACK:", errorStack);
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
 
     return Response.json({
       success: false,
       error: errorMessage,
-      stack: error instanceof Error ? error.stack : undefined
+      stack: errorStack
     }, { status: 500 });
   }
 }
