@@ -32,6 +32,15 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
     }
   };
 
+  // Auto-resize height based on value
+  React.useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${Math.min(scrollHeight, 200)}px`;
+    }
+  }, [inputValue]);
+
   const handlePlusClick = () => {
     fileInputRef.current?.click();
   };
@@ -73,13 +82,10 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
               onKeyDown={handleKeyDown}
               placeholder="Ask DealCollab AI anything..." 
               rows={1}
+              autoFocus
+              enterKeyHint="send"
               className="flex-1 bg-transparent border-none outline-none text-foreground text-[16px] py-1 px-0 pr-4 placeholder:text-brand-secondary/60 resize-none min-h-[24px] max-h-[200px] scrollbar-hide"
               style={{ height: 'auto' }}
-              onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = 'auto';
-                target.style.height = `${target.scrollHeight}px`;
-              }}
             />
             
             <button 
