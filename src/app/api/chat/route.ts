@@ -1,7 +1,7 @@
 import { auth } from '@/auth';
 import { db } from '@/db';
-import { chatMessages, chatSessions } from '@/db/schema';
-import { asc, desc, eq } from 'drizzle-orm';
+import { chatSessions } from '@/db/schema';
+import { desc, eq } from 'drizzle-orm';
 import Groq from 'groq-sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/utils/supabase/server';
@@ -161,10 +161,17 @@ export async function POST(req: NextRequest) {
       throw new Error(msgErr.message);
     }
 
-    const history = await db.query.chatMessages.findMany({
-      where: eq(chatMessages.chatId, activeChatId),
-      orderBy: [asc(chatMessages.createdAt)],
-    });
+    // 3. FETCH FULL HISTORY (Use Supabase for consistency with the insert above)
+    const { data: history, error: historyErr } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("chat_id", activeChatId)
+      .order("created_at", { ascending: true });
+
+    if (historyErr || !history) {
+      console.error("Supabase history error:", historyErr);
+      throw new Error(historyErr?.message || "Failed to fetch history");
+    }
 
     const formattedHistory = history.map(h => {
       let content = h.content;
@@ -207,12 +214,12 @@ export async function POST(req: NextRequest) {
     }
     console.log("🧠 CURRENT STATE:", JSON.stringify(conversationData));
 
-    // 3. GROQ CLIENT INITIALIZATION (INSIDE HANDLER ONLY)
+    // 4. GROQ CLIENT INITIALIZATION (INSIDE HANDLER ONLY)
     const groq = new Groq({
       apiKey: process.env.GROQ_API_KEY
     });
 
-    // 4. AI CALL WITH RETRY LOGIC
+    // 5. AI CALL WITH RETRY LOGIC
     let aiContent = "";
     let attempts = 0;
     const maxAttempts = 2;
@@ -232,16 +239,20 @@ ${truncatedDoc}
 ${SYSTEM_PROMPT}`;
     }
 
+    const aiMessages = [
+      { role: "system", content: contextPrompt + `\n\nCURRENT_STATE_OF_EXTRACTION: ${JSON.stringify(conversationData)}` },
+      ...formattedHistory
+    ];
+
+    console.log("MESSAGES SENT TO AI:", JSON.stringify(aiMessages, null, 2));
+
     while (attempts < maxAttempts) {
       const currentModel = attempts === 0 ? MODEL : FALLBACK_MODEL;
       try {
         console.log(`Using model: ${currentModel} (Attempt ${attempts + 1})`);
         const aiResponse = await groq.chat.completions.create({
           model: currentModel,
-          messages: [
-            { role: "system", content: contextPrompt + `\n\nCURRENT_STATE_OF_EXTRACTION: ${JSON.stringify(conversationData)}` },
-            ...formattedHistory
-          ],
+          messages: aiMessages as Groq.Chat.ChatCompletionMessageParam[],
           temperature: 0.3,
           response_format: { type: "json_object" }
         });
