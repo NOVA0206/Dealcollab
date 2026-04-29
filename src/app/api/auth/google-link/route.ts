@@ -78,9 +78,11 @@ export async function POST(req: Request) {
     cookieStore.delete('verified_phone_session');
 
     return NextResponse.json({ success: true, user: targetUser });
-  } catch (error) {
-    console.error('Google Link Route Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ error: errorMessage || 'Internal server error' }, { status: 500 });
   }
 }
 

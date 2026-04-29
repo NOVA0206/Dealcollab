@@ -1,18 +1,6 @@
 'use server';
 
 import { db } from "@/db";
-import { users, verificationTokens } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { cookies } from "next/headers";
-import { signIn } from "@/auth";
-
-/**
- * MOCK WHATSAPP SENDER
- * In production, replace this with a call to Twilio or Meta Cloud API
- */
-import { sendWhatsAppOTP as realSendWhatsAppOTP } from "@/lib/whatsapp";
-
-import { auth } from "@/auth";
 import { sql } from "drizzle-orm";
 
 /**
@@ -33,9 +21,11 @@ export async function fixDatabaseConstraint() {
     await db.execute(sql`ALTER TABLE "verification_tokens" ADD CONSTRAINT "verification_tokens_identifier_unique" UNIQUE ("identifier")`);
     
     return { success: true };
-  } catch (error) {
-    console.error("DB FIX ERROR:", error);
-    return { error: error instanceof Error ? error.message : "Internal database repair error" };
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return { error: errorMessage || "Internal database repair error" };
   }
 }
 

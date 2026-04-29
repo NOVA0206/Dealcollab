@@ -29,9 +29,11 @@ export async function GET() {
       balance: user?.tokens || 0,
       transactions: history
     });
-  } catch (error) {
-    console.error('Token ledger fetch error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ error: errorMessage || 'Internal Server Error' }, { status: 500 });
   }
 }
 
@@ -80,8 +82,10 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, balance: finalTokens });
-  } catch (error) {
-    console.error('Token transaction error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ error: errorMessage || 'Internal Server Error' }, { status: 500 });
   }
 }

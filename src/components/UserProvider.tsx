@@ -275,10 +275,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         throw new Error(err.error || 'Failed to approve connection');
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Something went wrong.';
+      console.error("FULL ERROR:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       addNotification({
         type: 'error',
-        message: errorMessage,
+        message: errorMessage || 'Something went wrong.',
         time: 'Just now'
       });
     }

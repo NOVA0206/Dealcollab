@@ -38,8 +38,10 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true, phone: user.phone });
-  } catch (error) {
-    console.error('OTP Verify Error:', error);
-    return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ error: errorMessage || 'Verification failed' }, { status: 500 });
   }
 }

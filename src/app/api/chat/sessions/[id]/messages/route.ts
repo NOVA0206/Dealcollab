@@ -47,12 +47,13 @@ export async function GET(
 
     return NextResponse.json(cleanedMessages);
   } catch (error: unknown) {
-    const err = error as Error;
-    console.error('Messages fetch error:', err);
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
     return NextResponse.json({ 
       success: false, 
-      error: err.message, 
-      stack: err.stack 
+      error: errorMessage, 
+      stack: error instanceof Error ? error.stack : undefined
     }, { status: 500 });
   }
 }

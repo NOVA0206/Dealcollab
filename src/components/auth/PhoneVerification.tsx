@@ -82,9 +82,11 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
            onVerify();
         }
       }
-    } catch (err) {
-      console.error(err);
-      setError("An unexpected error occurred");
+    } catch (err: unknown) {
+      console.error("FULL ERROR:", err);
+      console.error("STRINGIFIED:", JSON.stringify(err, null, 2));
+      const errorMessage = err instanceof Error ? err.message : (typeof err === 'string' ? err : JSON.stringify(err));
+      setError(errorMessage || "An unexpected error occurred");
     }
     setIsLoading(false);
   };

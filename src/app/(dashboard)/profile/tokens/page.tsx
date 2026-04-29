@@ -26,8 +26,9 @@ export default function TokenUsagePage() {
         setBalance(data.balance);
         setTransactions(data.transactions);
       }
-    } catch (error) {
-      console.error('Failed to fetch token ledger:', error);
+    } catch (error: unknown) {
+      console.error("FULL ERROR:", error);
+      console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
     } finally {
       setLoading(false);
     }

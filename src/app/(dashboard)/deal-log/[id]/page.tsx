@@ -3,13 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  ArrowLeft, ShieldCheck, Target, Globe, 
+  ArrowLeft, ShieldCheck, Globe, 
   TrendingUp, Clock, Info, Coins, AlertCircle, 
-  CheckCircle2, Sparkles, Building2, Layers
+  Sparkles
 } from 'lucide-react';
 import { useUser } from '@/components/UserProvider';
 import { useNotifications } from '@/components/NotificationProvider';
-import { Skeleton } from '@/components/Skeleton';
+
 
 interface AnonymousMatch {
   id: string;
@@ -198,7 +198,7 @@ export default function MatchDetailPage() {
                  <div className="space-y-2 md:col-span-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Special Conditions & Notes</label>
                     <p className="text-sm font-medium text-[#4B5563] leading-relaxed bg-gray-50/50 p-4 rounded-2xl border border-gray-100 italic">
-                       "{match.specialConditions}"
+                       &quot;{match.specialConditions}&quot;
                     </p>
                  </div>
               </div>

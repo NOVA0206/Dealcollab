@@ -33,13 +33,15 @@ export async function GET(req: NextRequest) {
     .createSignedUploadUrl(path);
 
   if (error) {
-    console.error('Error creating signed upload URL:', error);
+    console.error("Supabase error:", error);
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
     
     // Check if it's a "bucket not found" error
     const isNotFound = error.message?.includes('not found') || 
                        error.message?.includes('does not exist') || 
-                       (error as any).status === 404 || 
-                       (error as any).status === 400;
+                       (error as { status?: number }).status === 404 || 
+                       (error as { status?: number }).status === 400;
 
     if (isNotFound) {
       return NextResponse.json({ 
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest) {
       }, { status: 500 });
     }
 
-    return NextResponse.json({ error: 'Could not generate upload permission' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Could not generate upload permission' }, { status: 500 });
   }
 
   return NextResponse.json({

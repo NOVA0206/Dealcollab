@@ -108,7 +108,10 @@ export async function POST(req: NextRequest) {
         .select()
         .single();
         
-      if (sessionErr) throw sessionErr;
+      if (sessionErr) {
+        console.error("Supabase error:", sessionErr);
+        throw new Error(sessionErr.message);
+      }
       activeChatId = newSession.id;
     }
 
@@ -120,7 +123,10 @@ export async function POST(req: NextRequest) {
         content: message,
       }]);
       
-    if (msgErr) throw msgErr;
+    if (msgErr) {
+      console.error("Supabase error:", msgErr);
+      throw new Error(msgErr.message);
+    }
 
     const history = await db.query.chatMessages.findMany({
       where: eq(chatMessages.chatId, activeChatId),
@@ -225,7 +231,10 @@ export async function POST(req: NextRequest) {
         content: JSON.stringify(extraction),
       }]);
       
-    if (assistantMsgErr) throw assistantMsgErr;
+    if (assistantMsgErr) {
+      console.error("Supabase error:", assistantMsgErr);
+      throw new Error(assistantMsgErr.message);
+    }
 
     // 7. DEAL EXTRACTION LOGIC & PERSISTENCE
     const d = extraction.data;
@@ -264,7 +273,10 @@ export async function POST(req: NextRequest) {
             source: 'WEB',
           }]);
 
-        if (mandateErr) throw mandateErr;
+        if (mandateErr) {
+          console.error("Supabase error:", mandateErr);
+          throw new Error(mandateErr.message);
+        }
 
         // Step 4: Insert into Deals
         const { error: dealErr } = await supabase
@@ -278,7 +290,10 @@ export async function POST(req: NextRequest) {
             status: 'live',
           }]);
 
-        if (dealErr) throw dealErr;
+        if (dealErr) {
+          console.error("Supabase error:", dealErr);
+          throw new Error(dealErr.message);
+        }
 
         console.log("✅ DB INSERT SUCCESSFUL");
       } catch (dbErr) {
@@ -301,13 +316,15 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: unknown) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    console.error("🔥 REAL ERROR:", err);
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
 
     return Response.json({
       success: false,
-      error: err.message,
-      stack: err.stack
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined
     }, { status: 500 });
   }
 }

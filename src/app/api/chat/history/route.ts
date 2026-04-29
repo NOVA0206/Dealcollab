@@ -28,12 +28,14 @@ export async function GET() {
       created_at: s.createdAt
     })));
 
-  } catch (error: any) {
-    console.error("🔥 HISTORY FETCH CRASH:", error);
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
     return NextResponse.json({
       success: false,
-      error: error.message,
-      stack: error.stack
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined
     }, { status: 500 });
   }
 }

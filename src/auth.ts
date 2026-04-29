@@ -145,8 +145,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             token.tokens = dbUser.tokens || 0;
             token.profileCompletion = dbUser.profileCompletion || 0;
           }
-        } catch (error) {
-          console.error("[AUTH JWT] Profile sync failed (non-fatal):", error);
+        } catch (error: unknown) {
+          console.error("FULL ERROR:", error);
+          console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
           // Return existing token — do NOT throw, keeps user logged in
         }
       }

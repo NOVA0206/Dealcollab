@@ -32,6 +32,7 @@ export async function GET() {
     let profile = initialProfile;
 
     if (dbError) {
+      console.error("Supabase error:", dbError);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
 
@@ -49,7 +50,8 @@ export async function GET() {
         .single();
 
       if (insertError) {
-        return NextResponse.json({ error: "Failed to create user profile" }, { status: 500 });
+        console.error("Supabase error:", insertError);
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
       profile = newProfile;
     }
@@ -86,9 +88,11 @@ export async function GET() {
     };
 
     return NextResponse.json(profileData);
-  } catch (error) {
-    console.error('Profile fetch error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
@@ -126,7 +130,8 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (fetchError || !currentUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      if (fetchError) console.error("Supabase error:", fetchError);
+      return NextResponse.json({ error: fetchError?.message || 'User not found' }, { status: 404 });
     }
 
     // Reward logic: will be re-evaluated after re-calculating the new score based on DB state
@@ -198,7 +203,10 @@ export async function POST(req: NextRequest) {
       .update(updateData)
       .ilike("email", email);
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error("Supabase error:", updateError);
+      throw new Error(updateError.message);
+    }
 
     // 5. Recalculate completion using the NEW logic based on DB state
     const { data: updatedUser } = await supabase
@@ -249,9 +257,11 @@ export async function POST(req: NextRequest) {
       shouldShowSuccess,
       progress: score
     });
-  } catch (error) {
-    console.error('Profile save error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 

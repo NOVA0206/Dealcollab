@@ -92,12 +92,9 @@ export async function POST(req: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('[UPLOAD] Storage upload failed:', {
-        error: uploadError,
-        bucket: BUCKET_NAME,
-        keyType,
-        fileName,
-      });
+      console.error("Supabase error:", uploadError);
+      console.error("FULL ERROR:", uploadError);
+      console.error("STRINGIFIED:", JSON.stringify(uploadError, null, 2));
 
       // Provide actionable error message
       let userMessage = 'Upload failed: ' + uploadError.message;
@@ -122,7 +119,9 @@ export async function POST(req: NextRequest) {
       .ilike('email', email);
 
     if (updateError) {
-      console.error('[UPLOAD] Failed to save URL to profile:', updateError);
+      console.error("Supabase error:", updateError);
+      console.error("FULL ERROR:", updateError);
+      console.error("STRINGIFIED:", JSON.stringify(updateError, null, 2));
     }
 
     console.log('[UPLOAD] Success:', { fileName, url: urlData.publicUrl, keyType });
@@ -132,9 +131,10 @@ export async function POST(req: NextRequest) {
       url: urlData.publicUrl,
       fileName: file.name,
     });
-  } catch (error) {
-    console.error('[UPLOAD] Unhandled error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown upload error';
-    return NextResponse.json({ field: 'file', message: `Upload failed: ${message}` }, { status: 500 });
+  } catch (error: unknown) {
+    console.error("FULL ERROR:", error);
+    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ field: 'file', message: `Upload failed: ${errorMessage || 'Unknown upload error'}` }, { status: 500 });
   }
 }

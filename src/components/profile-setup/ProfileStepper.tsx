@@ -228,10 +228,11 @@ export default function ProfileStepper({ onComplete, initialData }: ProfileStepp
       if (result.rewarded) addTokens(100);
       setOnboarding('profileCompleted', true);
       onComplete(result.shouldShowSuccess);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Submission failed';
-      console.error('Profile submission error:', error);
-      alert(message || 'Failed to save profile. Please try again.');
+    } catch (error: unknown) {
+      console.error("FULL ERROR:", error);
+      console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+      const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+      alert(errorMessage || 'Failed to save profile. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

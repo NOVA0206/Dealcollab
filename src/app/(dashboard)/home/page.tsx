@@ -73,12 +73,14 @@ export default function Home() {
         fetchSessions();
       }
     } catch (error: unknown) {
-      const err = error as Error;
-      console.error('Chat error:', err);
+      console.error("FULL ERROR:", error);
+      console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
+      
+      const errorMessage = error instanceof Error ? error.message : (typeof error === "string" ? error : JSON.stringify(error));
       
       setMessages(prev => [...prev, {
         role: 'assistant' as const,
-        content: `❌ ERROR: ${err.message || 'Unknown error occurred'}`,
+        content: `❌ ERROR: ${errorMessage}`,
         id: (Date.now() + 2).toString(),
         type: 'error' as const
       }]);
