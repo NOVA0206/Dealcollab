@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     const session = await auth();
     if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { message, chatId } = await req.json();
+    const { message, chatId, documentText } = await req.json();
     if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 });
 
     // 2. SESSION & MESSAGE PERSISTENCE
@@ -220,6 +220,21 @@ export async function POST(req: NextRequest) {
     let attempts = 0;
     const maxAttempts = 2;
 
+    // Build context-aware prompt
+    let contextPrompt = SYSTEM_PROMPT;
+    if (documentText) {
+      // Chunking: keep only first 15k characters to stay within context limits for now
+      const truncatedDoc = documentText.slice(0, 15000);
+      contextPrompt = `You are a deal intelligence assistant.
+Use the following document to answer the user query. Prioritize document content over generic knowledge.
+
+DOCUMENT:
+${truncatedDoc}
+
+---
+${SYSTEM_PROMPT}`;
+    }
+
     while (attempts < maxAttempts) {
       const currentModel = attempts === 0 ? MODEL : FALLBACK_MODEL;
       try {
@@ -227,7 +242,7 @@ export async function POST(req: NextRequest) {
         const aiResponse = await groq.chat.completions.create({
           model: currentModel,
           messages: [
-            { role: "system", content: SYSTEM_PROMPT + `\n\nCURRENT_STATE_OF_EXTRACTION: ${JSON.stringify(conversationData)}` },
+            { role: "system", content: contextPrompt + `\n\nCURRENT_STATE_OF_EXTRACTION: ${JSON.stringify(conversationData)}` },
             ...formattedHistory
           ],
           temperature: 0.3,

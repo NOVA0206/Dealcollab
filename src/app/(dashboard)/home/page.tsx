@@ -26,7 +26,7 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, file?: File | null) => {
     if (!text.trim()) return;
 
     // 1. Add user message instantly
@@ -39,14 +39,34 @@ export default function Home() {
     setMessages(prev => [...prev, userMsg]);
 
     try {
-      // 2. We can't use the context loading here easily as it's for 'loadChat'
-      // but let's just proceed with the fetch. 
-      // If we wanted a "bot is typing" we'd add a dummy message or use a local loading state.
-      
+      let documentText = '';
+      if (file) {
+        console.log("Parsing document:", file.name);
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const parseRes = await fetch('/api/chat/parse-document', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (parseRes.ok) {
+          const parseData = await parseRes.json();
+          documentText = parseData.text;
+          console.log("Document parsed successfully. Length:", documentText.length);
+        } else {
+          console.error("Failed to parse document");
+        }
+      }
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, chatId: activeChatId }),
+        body: JSON.stringify({ 
+          message: text, 
+          chatId: activeChatId,
+          documentText: documentText // Pass the context
+        }),
       });
 
       const data = await response.json();
@@ -108,7 +128,7 @@ export default function Home() {
             <div className="space-y-6">
                 <ChatArea 
                     messages={messages} 
-                    onQuestionClick={(q) => handleSendMessage(q)}
+                    onQuestionClick={(q) => handleSendMessage(q, null)}
                 />
             </div>
           )}

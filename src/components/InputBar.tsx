@@ -3,18 +3,21 @@ import React, { useState, useRef } from 'react';
 import { Plus, Send } from 'lucide-react';
 
 interface InputBarProps {
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, file?: File | null) => void;
 }
 
 export default function InputBar({ onSendMessage }: InputBarProps) {
   const [inputValue, setInputValue] = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (inputValue.trim()) {
-      onSendMessage(inputValue);
+      // Pass both text and file if available
+      onSendMessage(inputValue, pendingFile);
       setInputValue('');
+      setPendingFile(null);
     }
   };
 
@@ -31,7 +34,9 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setInputValue(prev => prev + (prev ? ' ' : '') + `[Attached: ${file.name}]`);
+      setPendingFile(file);
+      // Visually indicate attachment in the input field without changing UI structure
+      setInputValue(prev => prev.includes(`[Attached:`) ? prev : prev + (prev ? ' ' : '') + `[Attached: ${file.name}]`);
     }
   };
 
