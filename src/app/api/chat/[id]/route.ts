@@ -1,32 +1,72 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { db } from '@/db';
-import { chatSessions } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { createServerSupabaseClient } from '@/utils/supabase/server';
 
 export async function DELETE(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
+  if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { id: chatId } = await params;
+  const { id } = await params;
+  const supabase = createServerSupabaseClient();
+  if (!supabase) throw new Error("Supabase client failed to initialize");
 
   try {
-    // Delete the chat session (cascades to messages in schema)
-    await db.delete(chatSessions).where(
-      and(
-        eq(chatSessions.id, chatId),
-        eq(chatSessions.userId, session.user.id)
-      )
-    );
+    // 1. Fetch DB ID by email (Identity mismatch fix)
+    const { data: dbUser, error: userErr } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", session.user.email)
+      .single();
 
-    return NextResponse.json({ success: true, message: 'Chat deleted' });
-  } catch (error) {
-    console.error('Chat deletion error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    if (userErr || !dbUser) {
+      return NextResponse.json({ error: 'User record missing' }, { status: 404 });
+    }
+
+    const userId = dbUser.id;
+
+    // 2. Verify ownership before deletion
+    const { data: chatSession, error: checkErr } = await supabase
+      .from("chat_sessions")
+      .select("id")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .single();
+
+    if (checkErr || !chatSession) {
+      return NextResponse.json({ error: 'Chat not found or access denied' }, { status: 404 });
+    }
+
+    // 3. Delete messages first (if not cascading)
+    const { error: msgDelErr } = await supabase
+      .from("chat_messages")
+      .delete()
+      .eq("chat_id", id);
+
+    if (msgDelErr) {
+      console.error("Failed to delete messages:", msgDelErr);
+      throw new Error(msgDelErr.message);
+    }
+
+    // 4. Delete the session
+    const { error: sessionDelErr } = await supabase
+      .from("chat_sessions")
+      .delete()
+      .eq("id", id);
+
+    if (sessionDelErr) {
+      console.error("Failed to delete session:", sessionDelErr);
+      throw new Error(sessionDelErr.message);
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    console.error("DELETE CHAT ERROR:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
