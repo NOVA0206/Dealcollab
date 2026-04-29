@@ -1,37 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { db } from '@/db';
-import { chatMessages, chatSessions } from '@/db/schema';
-import { eq, asc, and } from 'drizzle-orm';
+import { createServerSupabaseClient } from '@/utils/supabase/server';
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
+  if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { id } = await params;
+  const supabase = createServerSupabaseClient();
+  if (!supabase) throw new Error("Supabase client failed to initialize");
 
   try {
-    // Verify session ownership
-    const chatSession = await db.query.chatSessions.findFirst({
-      where: and(
-        eq(chatSessions.id, id),
-        eq(chatSessions.userId, session.user.id)
-      )
-    });
+    // 1. Fetch DB ID by email (Mismatch fix)
+    const { data: dbUser, error: userErr } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", session.user.email)
+      .single();
 
-    if (!chatSession) {
+    if (userErr || !dbUser) {
+      return NextResponse.json({ error: 'User record missing' }, { status: 404 });
+    }
+
+    const userId = dbUser.id;
+
+    // 2. Verify session ownership
+    const { data: chatSession, error: sessionErr } = await supabase
+      .from("chat_sessions")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .single();
+
+    if (sessionErr || !chatSession) {
       return NextResponse.json({ error: 'Chat not found' }, { status: 404 });
     }
 
-    const messages = await db.query.chatMessages.findMany({
-      where: eq(chatMessages.chatId, id),
-      orderBy: [asc(chatMessages.createdAt)],
-    });
+    // 3. Fetch messages
+    const { data: messages, error: msgErr } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("chat_id", id)
+      .order("created_at", { ascending: true });
+
+    if (msgErr) {
+      throw new Error(msgErr.message);
+    }
 
     const cleanedMessages = messages.map(m => {
       if (m.role === 'assistant') {

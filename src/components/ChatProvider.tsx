@@ -40,7 +40,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   // Define the core fetching logic
   const performFetch = useCallback(async () => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.email) return;
     try {
       const res = await fetch('/api/chat/history');
       const data = await res.json();
@@ -52,7 +52,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error('Failed to fetch sessions:', err);
     }
-  }, [session?.user?.id]);
+  }, [session?.user?.email]);
 
   // Public fetchSessions that can be called from outside
   const fetchSessions = useCallback(async () => {
@@ -64,12 +64,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     let isMounted = true;
     
     const init = async () => {
-      if (!session?.user?.id) return;
+      if (!session?.user?.email) return;
       try {
+        console.log("INITIAL CHAT FETCH FOR:", session.user.email);
         const res = await fetch('/api/chat/history');
         const data = await res.json();
         if (isMounted) {
           if (Array.isArray(data)) {
+            console.log("SESSIONS LOADED:", data.length);
             setSessions(data);
           } else if (data.success === false) {
              console.error('API Error on Init:', data.error, data.stack);
@@ -85,7 +87,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [session?.user?.id]);
+  }, [session?.user?.email]);
 
   const loadChat = async (id: string) => {
     setLoading(true);
