@@ -60,10 +60,25 @@ When all 9 fields are collected, set is_complete: true and use this EXACT messag
 export async function GET() {
   try {
     const session = await auth();
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const supabase = createServerSupabaseClient();
+    if (!supabase) throw new Error("Supabase client failed to initialize");
+
+    // Fetch DB ID by email (mismatch fix)
+    const { data: dbUser, error: fetchErr } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", session.user.email)
+      .single();
+
+    if (fetchErr || !dbUser) {
+      console.warn("User not found in DB for history fetch:", session.user.email);
+      return NextResponse.json([]);
+    }
 
     const history = await db.query.chatSessions.findMany({
-      where: eq(chatSessions.userId, session.user.id),
+      where: eq(chatSessions.userId, dbUser.id),
       orderBy: [desc(chatSessions.createdAt)],
     });
 
@@ -97,26 +112,33 @@ export async function POST(req: NextRequest) {
     const supabase = createServerSupabaseClient();
     if (!supabase) throw new Error("Supabase client failed to initialize");
 
-    // ENSURE USER EXISTS (Production Fix for foreign key constraint)
-    console.log("User ID:", session.user.id);
-    const { error: upsertError } = await supabase
+    // ENSURE USER EXISTS & GET DB ID (Production Fix for mismatched IDs)
+    const userEmail = session.user.email?.trim().toLowerCase();
+    if (!userEmail) throw new Error("User email missing from session");
+
+    const { data: dbUser, error: upsertError } = await supabase
       .from("users")
-      .upsert([{ 
-        id: session.user.id, 
-        email: session.user.email 
-      }], { onConflict: 'id' });
+      .upsert({ 
+        email: userEmail,
+        name: session.user.name || userEmail.split('@')[0]
+      }, { onConflict: 'email' })
+      .select('id')
+      .single();
       
-    if (upsertError) {
-      console.error("User upsert failed:", upsertError);
-      // We log but don't strictly block here as the user might already exist
+    if (upsertError || !dbUser) {
+      console.error("User sync failed:", upsertError);
+      throw new Error("Failed to sync user identity: " + (upsertError?.message || "User not found"));
     }
+
+    const userId = dbUser.id;
+    console.log("Database User ID:", userId);
 
     let activeChatId = chatId;
     if (!activeChatId) {
       const { data: newSession, error: sessionErr } = await supabase
         .from("chat_sessions")
         .insert([{
-          user_id: session.user.id,
+          user_id: userId,
           title: message.slice(0, 30) + (message.length > 30 ? "..." : "")
         }])
         .select()
@@ -269,7 +291,7 @@ export async function POST(req: NextRequest) {
         const { error: mandateErr } = await supabase
           .from("mandates")
           .insert([{
-            user_id: session.user.id,
+            user_id: userId,
             raw_text: message,
             normalised_text: JSON.stringify(d),
             intent: d.intent,
@@ -296,7 +318,7 @@ export async function POST(req: NextRequest) {
         const { error: dealErr } = await supabase
           .from("deals")
           .insert([{
-            user_id: session.user.id,
+            user_id: userId,
             title: `${d.intent}: ${d.sectors.join(", ")} deal`,
             sector: d.sectors.join(", "),
             region: d.geographies.join(", "),

@@ -11,7 +11,17 @@ export async function GET() {
   }
 
   try {
-    const userId = session.user.id;
+    const userEmail = session.user.email?.trim().toLowerCase();
+    if (!userEmail) throw new Error("User email missing from session");
+
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.email, userEmail),
+      columns: { id: true }
+    });
+
+    if (!dbUser) return NextResponse.json({ balance: 0, transactions: [] });
+
+    const userId = dbUser.id;
 
     // 1. Fetch current balance
     const user = await db.query.users.findFirst({
@@ -44,7 +54,17 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const userId = session.user.id;
+    const userEmail = session.user.email?.trim().toLowerCase();
+    if (!userEmail) throw new Error("User email missing from session");
+
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.email, userEmail),
+      columns: { id: true }
+    });
+
+    if (!dbUser) return NextResponse.json({ error: 'User record not initialized' }, { status: 404 });
+
+    const userId = dbUser.id;
     const body = await req.json();
     const { type, action, amount } = body;
 
