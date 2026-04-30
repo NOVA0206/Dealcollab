@@ -1,0 +1,31 @@
+/**
+ * 🧠 CONVERSATION STATE SCHEMA
+ * Defines the structured data extracted during the Deal Intelligence flow.
+ */
+
+export interface ConversationState {
+  sector: string | null;
+  geography: string | null;
+  deal_size: string | null;
+  revenue: string | null;
+  structure: string | null;
+  intent_focus: string | null;
+  industry_data: Record<string, unknown> | null;
+}
+
+export interface IntelligenceState {
+  intent: "SELL_SIDE" | "BUY_SIDE" | "FUNDRAISING" | "DEBT" | "STRATEGIC_PARTNERSHIP" | null;
+  state: ConversationState;
+  is_complete: boolean;
+  message: string;
+}
+
+export const INITIAL_STATE: ConversationState = {
+  sector: null,
+  geography: null,
+  deal_size: null,
+  revenue: null,
+  structure: null,
+  intent_focus: null,
+  industry_data: null
+};
