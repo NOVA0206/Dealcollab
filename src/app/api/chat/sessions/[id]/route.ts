@@ -7,9 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
+    const chatId = id;
     const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -17,7 +19,6 @@ export async function GET(
 
     const supabase = await createServerSupabaseClient();
     if (!supabase) throw new Error("Supabase client failed to initialize");
-    const chatId = params.id;
 
     // Fetch chat session and join with document
     const { data: chat, error } = await supabase
