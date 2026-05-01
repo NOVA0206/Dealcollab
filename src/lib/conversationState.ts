@@ -11,6 +11,13 @@ export interface ConversationState {
   structure: string | null;
   intent_focus: string | null;
   industry_data: Record<string, unknown> | null;
+  _source?: "document" | "chat";
+  valuation?: string | null;
+  offerings?: string | null;
+  clients?: string | null;
+  risks?: string | null;
+  strategic_objective?: string | null;
+  risk_appetite?: string | null;
 }
 
 export interface IntelligenceState {

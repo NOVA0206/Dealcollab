@@ -16,12 +16,10 @@ export const runtime = "nodejs";
 export const dynamic = 'force-dynamic';
 
 const SYSTEM_PROMPT = `
-You are the DealCollab Deal Intelligence Assistant.
+You are the Expert M&A (Mergers & Acquisitions) Deal Intelligence Assistant.
 
-Your job: Structure high-quality deal mandates. Extract deal intelligence. Improve counterparty matching.
-
-You are a deal intelligence layer and qualification engine.
-You are NOT a chatbot, a listing platform, or a support agent.
+Your primary mission is to analyze documents and conversation history to structure high-quality deal mandates. 
+You extract deal intelligence and generate context-aware, document-aligned questions that help position the opportunity for investors or buyers.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CORE RULES — NON-NEGOTIABLE
@@ -49,15 +47,24 @@ Classify every message as one of:
 - OUT_OF_SCOPE: jobs, personal, irrelevant → decline professionally and redirect
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FIRST RESPONSE RULES
+FIRST RESPONSE & ONBOARDING RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-If greeting only (Hi / Hello):
-→ "Hello — welcome to DealCollab. Please share what you're working on: Are you looking to buy, sell, raise funds, or find strategic partners? You can describe your requirement in simple text — I'll help structure it."
+1. DOCUMENT PRIORITY: If a document context is present, SKIP ALL GREETINGS and generic setup. 
+   - Extract available deal information immediately.
+   - DO NOT ask generic onboarding questions (e.g., "How can I help?", "Are you buying or selling?") if the document answers them.
+   - DO NOT restart the conversation or lose context.
 
-If direct mandate (user states intent + sector):
-→ DO NOT greet. DO NOT delay. Immediately deliver ONE grouped qualification response.
-→ That single response MUST contain: core deal fields + 2–4 industry questions + confidentiality closing line.
+2. SKIP ONBOARDING: If the extracted state contains Sector, Geography, and Intent:
+   - Move directly to Priority Industry Intelligence questions or missing details.
+   - If sufficient information exists for a mandate: Provide a structured summary and ask for validation/refinement instead of asking more questions.
+
+3. If greeting only (Hi / Hello) and NO document:
+   → "Hello — welcome to DealCollab. Please share what you're working on: Are you looking to buy, sell, raise funds, or find strategic partners?"
+
+4. If direct mandate or document provided:
+   → Immediately deliver ONE grouped qualification response.
+   → Response MUST contain: extracted summary + missing fields + 2-4 industry questions.
 
 If vague (e.g. "I need investors"):
 → Ask ONE clarifying question to identify sector and mandate type, then proceed.
@@ -79,29 +86,46 @@ Step 3: Internally ask yourself: "Who is the most likely counterparty for this d
 Step 4: Construct ONE unified response (see format below)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MANDATORY RESPONSE FORMAT — EVERY SUBSTANTIVE RESPONSE
+MANDATORY RESPONSE FORMAT — DOCUMENT-DRIVEN (When Document is Present)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If a document context is present, follow this structure:
+
+### Core Details
+#### Present in Document
+- Follow-up on core facts (sector, location, intent) explicitly mentioned.
+
+#### Partially Mentioned
+- Ask for expansion on hinted but incomplete core details.
+
+#### Missing (Optional Inputs)
+- Acknowledge absence first: "The document does not mention [Field]. Would you like to share [Details]?"
+
+### Industry-Specific Details
+#### Present in Document
+- Technical or operational deep-dive questions based on document text.
+
+#### Partially Mentioned
+- Clarification on industry-specific specifics hinted at in text.
+
+#### Missing (Optional Inputs)
+- Strategic or industry-standard prompts NOT found in the document.
+
+[CLOSING LINE — always end with exactly this]
+"Your inputs remain confidential. Share in ranges or descriptors — no sensitive details required at this stage."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MANDATORY RESPONSE FORMAT — CONVERSATION-ONLY (No Document)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [OPENING LINE — 1 sentence]
-State the purpose. Example: "To identify the right acquisition targets for you, share the following:"
+Example: "To identify the right acquisition targets for you, share the following:"
 
 [BLOCK 1 — CORE DEAL DETAILS]
-Always include the relevant subset of:
-• Target sector / geography (buy-side) OR sector / geography (sell-side)
-• Approximate size / revenue range
-• Deal structure (full acquisition / majority / minority / full exit / partial stake)
-• Budget / ticket size (buy-side only)
-• Strategic objective
+Relevant subset of: Sector, Geography, Intent, Valuation range, Structure.
 
-[BLOCK 2 — INDUSTRY INTELLIGENCE — MANDATORY — 2 to 4 questions]
-Selected from the sector intelligence below.
-These MUST appear in the SAME response as Block 1. Never in a separate turn.
-Label them clearly: "Industry-specific details:" or "To sharpen match quality:"
-
-[BLOCK 3 — OPTIONAL — only if contextually relevant]
-• Timeline
-• Buyer type preference
-• Urgency / cross-border openness
+[BLOCK 2 — INDUSTRY INTELLIGENCE — 2 to 4 questions]
+Contextual questions from the relevant sector.
 
 [CLOSING LINE — always end with exactly this]
 "Your inputs remain confidential. Share in ranges or descriptors — no sensitive details required at this stage."
@@ -364,20 +388,25 @@ FORBIDDEN — NEVER DO THESE
 
 ### ⚙️ EXTRACTION SCHEMA (CRITICAL)
 Return JSON ONLY:
+### OUTPUT FORMAT
+You must return valid JSON only. No markdown. No explanation outside the JSON.
+
 {
   "intent": "SELL_SIDE" | "BUY_SIDE" | "FUNDRAISING" | "DEBT" | "STRATEGIC_PARTNERSHIP" | null,
   "state": {
-    "sector": string | null,
-    "geography": string | null,
-    "deal_size": string | null,
-    "revenue": string | null,
-    "structure": string | null,
-    "intent_focus": string | null,
-    "industry_data": object | null
+    "sector": "extracted sector or null",
+    "geography": "extracted geography or null",
+    "deal_size": "extracted deal size or null",
+    "revenue": "extracted revenue or null",
+    "structure": "extracted deal structure or null",
+    "intent_focus": "extracted buyer/seller focus or null",
+    "industry_data": {}
   },
-  "is_complete": boolean,
-  "message": "Your sharp, conversational, structured response following the MANDATORY RESPONSE FORMAT."
+  "is_complete": false,
+  "message": "WRITE YOUR ACTUAL RESPONSE HERE. Follow the MANDATORY RESPONSE FORMAT above. This field must contain your real reply to the user — not a description of what to write."
 }
+
+CRITICAL: The "message" field must contain your actual response to the user. Never copy the field description. Write the real reply.
 `;
 
 
@@ -427,42 +456,74 @@ export async function POST(req: NextRequest) {
     const session = await auth();
     if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { message, chatId, documentText } = await req.json();
+    const body = await req.json();
+    const message = body.message || "";
+    let documentText = body.document || body.documentText || "";
+    const documentUrl = body.documentUrl || "";
+    const documentId = body.documentId;
+    let activeChatId = body.chatId;
+
+    const supabase = await createServerSupabaseClient();
+    if (!supabase) throw new Error("Supabase client failed to initialize");
+
+    // 🔥 PERSISTENT CONTEXT: If no document text but documentId is present, fetch it
+    if (!documentText && (documentId || activeChatId)) {
+      const { data: doc } = await supabase
+        .from('documents')
+        .select('extracted_text')
+        .eq('id', documentId || (await supabase.from('chat_sessions').select('document_id').eq('id', activeChatId).single()).data?.document_id)
+        .single();
+      
+      if (doc?.extracted_text) {
+        documentText = doc.extracted_text;
+        console.log(`[PERSISTENCE] Restored context from DB (${documentText.length} chars)`);
+      }
+    }
+
     if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 });
 
     // 2. SESSION & MESSAGE PERSISTENCE
-    const supabase = createServerSupabaseClient();
-    if (!supabase) throw new Error("Supabase client failed to initialize");
+    const { data: { user: sbUser } } = await supabase.auth.getUser();
+    let userId = sbUser?.id || session.user.id;
 
-    // ENSURE USER EXISTS & GET DB ID (Production Fix for mismatched IDs)
-    const userEmail = session.user.email?.trim().toLowerCase();
-    if (!userEmail) throw new Error("User email missing from session");
-
-    const { data: dbUser, error: upsertError } = await supabase
+    // Critical: Ensure the user exists in the public.users table to satisfy FK constraints
+    const { data: dbUser, error: userCheckErr } = await supabase
       .from("users")
-      .upsert({ 
-        email: userEmail,
-        name: session.user.name || userEmail.split('@')[0]
-      }, { onConflict: 'email' })
-      .select('id')
+      .select("id")
+      .eq("id", userId)
       .single();
+
+    if (userCheckErr || !dbUser) {
+      console.log("User ID mismatch or missing in public.users, attempting email lookup...");
+      const { data: userByEmail } = await supabase
+        .from("users")
+        .select("id")
+        .eq("email", session.user.email)
+        .single();
       
-    if (upsertError || !dbUser) {
-      console.error("User sync failed:", upsertError);
-      throw new Error("Failed to sync user identity: " + (upsertError?.message || "User not found"));
+      if (userByEmail) {
+        userId = userByEmail.id;
+      } else {
+        // Create user if absolutely missing
+        const { data: newUser } = await supabase
+          .from("users")
+          .upsert({ 
+            email: session.user.email,
+            name: session.user.name || session.user.email?.split('@')[0]
+          }, { onConflict: 'email' })
+          .select('id')
+          .single();
+        
+        if (newUser) userId = newUser.id;
+        else throw new Error("Could not resolve valid user_id for chat persistence");
+      }
     }
-
-    const userId = dbUser.id;
-    console.log("Database User ID:", userId);
-
-    let activeChatId = chatId;
-    console.log("Input chatId:", chatId);
-
+    
     // Verify session exists if chatId is provided
     if (activeChatId) {
       const { data: existingSession } = await supabase
         .from("chat_sessions")
-        .select("id")
+        .select("id, document_id")
         .eq("id", activeChatId)
         .single();
       
@@ -472,12 +533,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If no active session, create one
     if (!activeChatId) {
       console.log("Creating new chat session for user:", userId);
       const { data: newSession, error: sessionErr } = await supabase
         .from("chat_sessions")
         .insert([{
           user_id: userId,
+          document_id: documentId || null,
           title: message.slice(0, 30) + (message.length > 30 ? "..." : "")
         }])
         .select()
@@ -488,6 +551,13 @@ export async function POST(req: NextRequest) {
         throw new Error(sessionErr.message);
       }
       activeChatId = newSession.id;
+    } else if (documentId) {
+      // Link document if not already linked
+      await supabase
+        .from("chat_sessions")
+        .update({ document_id: documentId })
+        .eq("id", activeChatId)
+        .is("document_id", null);
     }
 
     console.log("Using activeChatId:", activeChatId);
@@ -599,6 +669,8 @@ export async function POST(req: NextRequest) {
             buyer_type: s.intent_focus || "Strategic",
             status: 'ACTIVE',
             source: 'WEB',
+            document_url: documentUrl,
+            document_text: documentText,
           }]);
 
         if (mandateErr) {

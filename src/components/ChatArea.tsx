@@ -9,14 +9,20 @@ export interface Message {
   content: string;
   id: string;
   type?: 'intro' | 'conversation' | 'clarification' | 'complete' | 'error' | 'deal_ready' | 'deal_saved';
+  file?: {
+    name: string;
+    url?: string;
+  };
+  questions?: string[];
 }
 
 interface ChatAreaProps {
   messages: Message[];
   onQuestionClick?: (question: string) => void;
+  isTyping?: boolean;
 }
 
-export default function ChatArea({ messages }: ChatAreaProps) {
+export default function ChatArea({ messages, isTyping, onQuestionClick }: ChatAreaProps) {
   const { profile } = useUser();
   console.log("[ChatArea] Rendering with messages:", messages.length);
 
@@ -50,6 +56,25 @@ export default function ChatArea({ messages }: ChatAreaProps) {
                   : 'bg-primary-soft text-foreground rounded-tl-sm border border-border'
               }`}
             >
+              {msg.file && (
+                <div className={`mb-3 p-3 rounded-xl flex items-center gap-3 border ${
+                  msg.role === 'user' ? 'bg-white/10 border-white/20' : 'bg-white border-border'
+                }`}>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    msg.role === 'user' ? 'bg-white/20' : 'bg-primary-soft'
+                  }`}>
+                    <span className="text-lg">📄</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-bold truncate ${msg.role === 'user' ? 'text-white' : 'text-foreground'}`}>
+                      {msg.file.name}
+                    </p>
+                    <p className={`text-[10px] uppercase tracking-wider font-black ${msg.role === 'user' ? 'text-white/60' : 'text-brand-secondary/60'}`}>
+                      Document Attachment
+                    </p>
+                  </div>
+                </div>
+              )}
               <p className="text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
                 {msg.content}
               </p>
@@ -63,9 +88,35 @@ export default function ChatArea({ messages }: ChatAreaProps) {
                 <span>Deal captured and intelligence extracted successfully.</span>
               </div>
             )}
+            {msg.role === 'assistant' && msg.questions && msg.questions.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {msg.questions.map((q, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => onQuestionClick?.(q)}
+                    className="text-xs font-bold px-3 py-1.5 rounded-full bg-white border border-border hover:border-primary/40 hover:bg-primary-soft text-brand-secondary transition-all active:scale-95 shadow-sm"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       ))}
+
+      {isTyping && (
+        <div className="flex items-start gap-4 w-full animate-in fade-in duration-500">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm mt-1 border bg-primary-soft border-border text-primary-hover">
+            <Sparkles size={18} className="animate-pulse" />
+          </div>
+          <div className="bg-primary-soft text-foreground px-5 py-4 rounded-2xl rounded-tl-sm border border-border shadow-sm flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -41,6 +41,8 @@ export const users = pgTable('users', {
   collaborationModel: text('collaboration_model').array(),
   profileAttachmentUrl: text('profile_attachment_url'),
   additionalInfo: text('additional_info'),
+  document_url: text('document_url'),
+  document_text: text('document_text'),
   
   
   // OTP Verification
@@ -177,13 +179,27 @@ export const mandates = pgTable('mandates', {
   buyerType: text('buyer_type'), // Strategic, Financial
   status: text('status').default('ACTIVE').notNull(),
   source: text('source').default('WEB').notNull(),
+  document_url: text('document_url'),
+  document_text: text('document_text'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 8.5 DOCUMENTS
+export const documents = pgTable('documents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  name: text('name').notNull(),
+  url: text('url').notNull(),
+  extracted_text: text('extracted_text'),
+  structured_data: jsonb('structured_data'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
 });
 
 // 9. CHAT SESSIONS
 export const chatSessions = pgTable('chat_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  documentId: uuid('document_id').references(() => documents.id, { onDelete: 'set null' }),
   title: text('title').default('New Deal Intake'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
@@ -249,7 +265,13 @@ export const mandatesRelations = relations(mandates, ({ one }) => ({
 
 export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => ({
   user: one(users, { fields: [chatSessions.userId], references: [users.id] }),
+  document: one(documents, { fields: [chatSessions.documentId], references: [documents.id] }),
   messages: many(chatMessages),
+}));
+
+export const documentsRelations = relations(documents, ({ one, many }) => ({
+  user: one(users, { fields: [documents.userId], references: [users.id] }),
+  chats: many(chatSessions),
 }));
 
 export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({

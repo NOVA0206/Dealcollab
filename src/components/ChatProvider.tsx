@@ -8,6 +8,10 @@ interface Message {
   id: string;
   type?: 'intro' | 'conversation' | 'clarification' | 'complete' | 'error' | 'deal_ready' | 'deal_saved';
   questions?: string[];
+  file?: {
+    name: string;
+    url?: string;
+  };
 }
 
 interface Session {
@@ -27,6 +31,12 @@ interface ChatContextType {
   loadChat: (id: string) => Promise<void>;
   deleteChat: (id: string) => Promise<void>;
   createNewChat: () => void;
+  documentId: string | null;
+  setDocumentId: (id: string | null) => void;
+  documentUrl: string | null;
+  setDocumentUrl: (url: string | null) => void;
+  documentText: string | null;
+  setDocumentText: (text: string | null) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -37,6 +47,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [documentText, setDocumentText] = useState<string | null>(null);
 
   // Define the core fetching logic
   const performFetch = useCallback(async () => {
@@ -59,22 +72,48 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     await performFetch();
   }, [performFetch]);
 
-  // UseEffect for initial load - using a local function to satisfy the linter
+  const loadChat = useCallback(async (id: string) => {
+    setLoading(true);
+    setActiveChatId(id);
+    try {
+      const res = await fetch(`/api/chat/sessions/${id}/messages`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setMessages(data);
+      }
+
+      // Fetch document linked to this chat
+      const chatDetailsRes = await fetch(`/api/chat/sessions/${id}`);
+      const chatDetails = await chatDetailsRes.json();
+      if (chatDetails.success && chatDetails.document) {
+        setDocumentId(chatDetails.document.id);
+        setDocumentUrl(chatDetails.document.url);
+        setDocumentText(chatDetails.document.extracted_text);
+      }
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+
+  // Restore state on app load
   useEffect(() => {
     let isMounted = true;
     
     const init = async () => {
       if (!session?.user?.email) return;
       try {
-        console.log("INITIAL CHAT FETCH FOR:", session.user.email);
+        console.log("INITIAL DATA RESTORE FOR:", session.user.email);
+        
+        // 2. Fetch Chat History (List only, don't auto-load)
         const res = await fetch('/api/chat/history');
         const data = await res.json();
+        
         if (isMounted) {
           if (Array.isArray(data)) {
-            console.log("SESSIONS LOADED:", data.length);
             setSessions(data);
-          } else if (data.success === false) {
-             console.error('API Error on Init:', data.error, data.stack);
           }
         }
       } catch (err) {
@@ -87,27 +126,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [session?.user?.email]);
-
-  const loadChat = async (id: string) => {
-    setLoading(true);
-    setActiveChatId(id);
-    try {
-      const res = await fetch(`/api/chat/sessions/${id}/messages`);
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setMessages(data);
-      }
-    } catch (err) {
-      console.error('Failed to load messages:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [session?.user?.email, loadChat]);
 
   const createNewChat = () => {
     setActiveChatId(null);
     setMessages([]);
+    setDocumentId(null);
+    setDocumentUrl(null);
+    setDocumentText(null);
   };
 
   const deleteChat = async (id: string) => {
@@ -135,7 +161,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       fetchSessions,
       loadChat,
       deleteChat,
-      createNewChat
+      createNewChat,
+      documentId,
+      setDocumentId,
+      documentUrl,
+      setDocumentUrl,
+      documentText,
+      setDocumentText
     }}>
       {children}
     </ChatContext.Provider>

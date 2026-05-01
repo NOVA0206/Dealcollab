@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useRef } from 'react';
-import ChatArea from "@/components/ChatArea";
+import ChatArea, { Message } from "@/components/ChatArea";
 import InputBar from "@/components/InputBar";
 import { ChatSkeleton } from '@/components/Skeleton';
 import { Plus } from 'lucide-react';
@@ -13,9 +13,11 @@ export default function Home() {
     activeChatId, 
     setActiveChatId, 
     setMessages, 
-    fetchSessions 
+    fetchSessions,
+    documentId
   } = useChat();
 
+  const [isTyping, setIsTyping] = React.useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -24,92 +26,138 @@ export default function Home() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isTyping]);
 
   const handleSendMessage = async (text: string, file?: File | null) => {
-    if (!text.trim()) return;
+    if (!text.trim() && !file) return;
 
-    // 1. Add user message instantly
-    const userMsg = {
+    // Build the display message for the user bubble
+    // If file only (no text), show a placeholder so the bubble is not empty
+    const displayText = text.trim() || (file ? `Please extract and analyse this document: ${file.name}` : '');
+
+    const userMsg: Message = {
       role: 'user' as const,
-      content: text,
+      content: displayText,
       id: Date.now().toString(),
+      file: file ? { name: file.name } : undefined
     };
-    
+
     setMessages(prev => [...prev, userMsg]);
+    setIsTyping(true);
 
     try {
       let documentText = '';
+      let documentUrl = '';
+      let structuredData = null;
+
+      let documentIdLocal: string | null = null;
+
       if (file) {
-        console.log("Parsing document:", file.name);
+        console.log("=== UPLOADING FILE ===", file.name, file.type, file.size);
         const formData = new FormData();
         formData.append('file', file);
+
+        let parseRes: Response;
+        try {
+          parseRes = await fetch('/api/chat/parse-document', {
+            method: 'POST',
+            body: formData,
+          });
+        } catch (fetchErr) {
+          throw new Error(`Parse request failed: ${fetchErr}`);
+        }
+
+        console.log("=== PARSE RESPONSE STATUS ===", parseRes.status);
         
-        const parseRes = await fetch('/api/chat/parse-document', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        if (parseRes.ok) {
-          const parseData = await parseRes.json();
-          documentText = parseData.text;
-          console.log("Document parsed successfully. Length:", documentText.length);
-        } else {
-          console.error("Failed to parse document");
+        const parseData = await parseRes.json();
+        console.log("=== PARSE RESPONSE BODY ===", JSON.stringify(parseData).slice(0, 300));
+
+        if (!parseRes.ok || !parseData.success) {
+          // Surface the error to the user clearly instead of swallowing it
+          throw new Error(parseData.error || `Document parsing failed with status ${parseRes.status}`);
+        }
+
+        documentText = parseData.text || '';
+        documentUrl = parseData.documentUrl || '';
+        structuredData = parseData.structured || null;
+        documentIdLocal = parseData.documentId || null;
+
+        console.log("=== EXTRACTED TEXT LENGTH ===", documentText.length);
+        console.log("=== EXTRACTED TEXT PREVIEW ===", documentText.slice(0, 200));
+
+        if (!documentText || documentText.trim().length < 10) {
+          throw new Error('Document appears empty or unreadable. Try a different file.');
         }
       }
+
+      // Build the message to send to the AI
+      // If user typed text AND attached a file, combine them
+      // If user only attached a file with no text, use an instruction prompt
+      const aiMessage = text.trim()
+        ? text.trim()
+        : `Please extract the deal mandate and key information from this document and begin qualification.`;
 
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: text, 
+        body: JSON.stringify({
+          message: aiMessage,
+          document: documentText.slice(0, 3000),
+          documentText: documentText.slice(0, 3000),
           chatId: activeChatId,
-          documentText: documentText // Pass the context
+          documentId: documentIdLocal || (typeof documentId === 'string' ? documentId : null),
+          documentUrl,
+          documentStructured: structuredData,
         }),
       });
 
-      const data = await response.json();
-      console.log("📡 API RESPONSE:", { status: response.status, ok: response.ok, data });
+      const chatData = await response.json();
 
-      if (!response.ok || data.success === false) {
-        throw new Error(data.error || 'Failed to process deal');
+      if (!response.ok || chatData.success === false) {
+        throw new Error(chatData.error || 'Failed to process deal');
       }
 
-      // 3. Add AI message instantly using functional update
-      const aiMsg = {
+      const aiMsg: Message = {
         role: 'assistant' as const,
-        content: data.message || data.content || "No response",
+        content: chatData.message || chatData.reply || 'No response',
         id: (Date.now() + 1).toString(),
-        type: data.type,
-        questions: data.questions,
+        type: chatData.type,
+        questions: chatData.questions,
       };
 
       setMessages(prev => [...prev, aiMsg]);
-      console.log("Chat updated with bot response:", aiMsg);
-      
-      // Sync ID and sessions if needed
-      if (!activeChatId && data.chatId) {
-        setActiveChatId(data.chatId);
+
+      if (!activeChatId && chatData.chatId) {
+        setActiveChatId(chatData.chatId);
         fetchSessions();
       }
+
     } catch (error: unknown) {
-      console.error("❌ CHAT ERROR:", error);
-      
-      let errorMessage = "An unknown error occurred";
-      if (error instanceof Error) {
-        errorMessage = error.message;
-        console.error("STACK:", error.stack);
-      } else if (typeof error === "string") {
-        errorMessage = error;
-      }
-      
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      console.error('[CHAT ERROR]', errorMessage);
+
+      // Format document errors more helpfully
+      const isDocError = errorMessage.includes('image-based') ||
+        errorMessage.includes('IMAGE_BASED_PDF') ||
+        errorMessage.includes('extract text');
+
+      const displayMessage = isDocError
+        ? '❌ This PDF contains images rather than text, so I cannot read it directly.\n\n' +
+          'To fix this:\n' +
+          '• Open the PDF in Word or Google Docs\n' +
+          '• Save/Export as DOCX format\n' +
+          '• Upload the DOCX file instead\n\n' +
+          'Alternatively, paste the key deal details directly in the chat.'
+        : `❌ ${errorMessage}`;
+
       setMessages(prev => [...prev, {
         role: 'assistant' as const,
-        content: `❌ ERROR: ${errorMessage}`,
+        content: displayMessage,
         id: (Date.now() + 2).toString(),
-        type: 'error' as const
+        type: 'error' as const,
       }]);
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -134,6 +182,7 @@ export default function Home() {
             <div className="space-y-6">
                 <ChatArea 
                     messages={messages} 
+                    isTyping={isTyping}
                     onQuestionClick={(q) => handleSendMessage(q, null)}
                 />
             </div>
