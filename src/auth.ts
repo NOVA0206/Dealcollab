@@ -8,9 +8,9 @@ import { accounts, sessions, users, verificationTokens } from "./db/schema";
 // Debug logging for Production/Vercel (Masked)
 if (process.env.NODE_ENV === "production") {
   console.log("Auth Configuration Check:", {
-    hasSecret: !!process.env.AUTH_SECRET,
-    hasGoogleId: !!process.env.AUTH_GOOGLE_ID,
-    hasGoogleSecret: !!process.env.AUTH_GOOGLE_SECRET,
+    hasSecret: !!(process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET),
+    hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
+    hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
     authUrl: process.env.AUTH_URL ? "Set" : "Not Set (Inferred)",
     trustHost: process.env.AUTH_TRUST_HOST || "Not Set",
   });
@@ -28,6 +28,7 @@ const adapter = DrizzleAdapter(db, {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter,
+  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
   ...authConfig,
   trustHost: true,
   debug: true, // Enabled for production debugging
@@ -71,7 +72,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  session: { strategy: "jwt" },
+  session: { strategy: "database" },
   callbacks: {
     // @ts-expect-error - callbacks might not be present in authConfig
     ...authConfig.callbacks,
