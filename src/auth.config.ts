@@ -1,8 +1,10 @@
 import Google from "next-auth/providers/google";
 import type { NextAuthConfig } from "next-auth";
 
+// Notice: In Auth.js v5, environment variables like AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET
+// are automatically picked up if they match these names. We explicitly pass them here
+// for clarity and to ensure they are used.
 export default {
-  secret: process.env.AUTH_SECRET,
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
@@ -11,5 +13,6 @@ export default {
   ],
   pages: {
     signIn: "/",
+    error: "/api/auth/error", // Explicitly define error page
   },
 } satisfies NextAuthConfig;

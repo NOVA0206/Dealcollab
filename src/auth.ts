@@ -5,6 +5,17 @@ import { accounts, sessions, users, verificationTokens } from "./db/schema";
 import authConfig from "./auth.config";
 import Credentials from "next-auth/providers/credentials";
 
+// Debug logging for Production/Vercel (Masked)
+if (process.env.NODE_ENV === "production") {
+  console.log("Auth Configuration Check:", {
+    hasSecret: !!process.env.AUTH_SECRET,
+    hasGoogleId: !!process.env.AUTH_GOOGLE_ID,
+    hasGoogleSecret: !!process.env.AUTH_GOOGLE_SECRET,
+    authUrl: process.env.AUTH_URL ? "Set" : "Not Set (Inferred)",
+    trustHost: process.env.AUTH_TRUST_HOST || "Not Set",
+  });
+}
+
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 
@@ -84,6 +95,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   session: { strategy: "jwt" },
+  debug: process.env.NODE_ENV === "development",
   callbacks: {
     // @ts-expect-error - callbacks might not be present in authConfig
     ...authConfig.callbacks,
