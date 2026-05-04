@@ -154,17 +154,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       return token;
     },
-    async session({ session, token }) {
+    async session({ session, token, user }) {
       if (session.user) {
-        session.user.id = token.id as string;
-        // @ts-expect-error - isPhoneVerified is added to session user via JWT token
-        session.user.isPhoneVerified = token.isPhoneVerified;
-        // @ts-expect-error - phone is added to session user via JWT token
-        session.user.phone = token.phone;
-        // @ts-expect-error - tokens is added to session user via JWT token
-        session.user.tokens = token.tokens;
-        // @ts-expect-error - profileCompletion is added to session user via JWT token
-        session.user.profileCompletion = token.profileCompletion;
+        // In database strategy, 'user' is passed. In jwt strategy, 'token' is passed.
+        if (user) {
+          session.user.id = user.id;
+          // @ts-expect-error - Custom properties on user object from database
+          session.user.isPhoneVerified = user.isPhoneVerified;
+          // @ts-expect-error - Custom properties on user object from database
+          session.user.phone = user.phone;
+          // @ts-expect-error - Custom properties on user object from database
+          session.user.tokens = user.tokens;
+          // @ts-expect-error - Custom properties on user object from database
+          session.user.profileCompletion = user.profileCompletion;
+        } else if (token) {
+          session.user.id = token.id as string;
+          // @ts-expect-error - isPhoneVerified is added to session user via JWT token
+          session.user.isPhoneVerified = token.isPhoneVerified;
+          // @ts-expect-error - phone is added to session user via JWT token
+          session.user.phone = token.phone;
+          // @ts-expect-error - tokens is added to session user via JWT token
+          session.user.tokens = token.tokens;
+          // @ts-expect-error - profileCompletion is added to session user via JWT token
+          session.user.profileCompletion = token.profileCompletion;
+        }
       }
       return session;
     },
