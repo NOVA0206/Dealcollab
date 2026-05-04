@@ -5,8 +5,22 @@ import OpenAI from "openai";
 
 type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+/**
+ * 🛠️ LAZY INITIALIZERS: Prevents build-time crashes if env vars are missing.
+ */
+function getOpenAI() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not defined in the environment.");
+  }
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
+
+function getGroq() {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY is not defined in the environment.");
+  }
+  return new Groq({ apiKey: process.env.GROQ_API_KEY });
+}
 
 export async function reconstructState(history: ChatMessage[]): Promise<IntelligenceState["state"]> {
   let conversationData: ConversationState = { ...INITIAL_STATE };
@@ -39,6 +53,7 @@ export async function reconstructState(history: ChatMessage[]): Promise<Intellig
 async function callAI(messages: ChatMessage[], maxTokens: number = 700): Promise<string> {
   try {
     console.log(`[AI] Attempting OpenAI (gpt-4o-mini)...`);
+    const openai = getOpenAI();
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
@@ -49,6 +64,7 @@ async function callAI(messages: ChatMessage[], maxTokens: number = 700): Promise
     return res.choices[0].message.content || "";
   } catch (err) {
     console.warn(`[AI] OpenAI failed, falling back to Groq:`, err);
+    const groq = getGroq();
     const res = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages,
