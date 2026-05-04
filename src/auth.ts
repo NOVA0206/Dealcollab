@@ -32,8 +32,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   debug: true, // Enabled for production debugging
   logger: {
-    error(code, metadata) {
-      console.error("NEXTAUTH ERROR:", code, metadata);
+    error(error) {
+      console.error("NEXTAUTH ERROR:", error);
     },
     warn(code) {
       console.warn("NEXTAUTH WARN:", code);
