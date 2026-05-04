@@ -26,45 +26,22 @@ const adapter = DrizzleAdapter(db, {
   verificationTokensTable: verificationTokens,
 });
 
-// Override createUser to support WhatsApp -> Google account linking
-const originalCreateUser = adapter.createUser;
-if (originalCreateUser) {
-  adapter.createUser = async (user) => {
-  const cookieStore = await cookies();
-  const whatsappPhone = cookieStore.get("whatsapp_phone")?.value;
-
-  if (whatsappPhone) {
-    // Check if a placeholder user exists with this phone
-    const existing = await db.query.users.findFirst({
-      where: eq(users.phone, whatsappPhone),
-    });
-
-    // If it's a WhatsApp placeholder (placeholder email), merge the Google profile into it
-    if (existing && existing.email?.endsWith('@dealcollab.ai')) {
-      const [updatedUser] = await db.update(users)
-        .set({
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          emailVerified: user.emailVerified,
-          source: 'whatsapp',
-        })
-        .where(eq(users.id, existing.id))
-        .returning();
-      
-      cookieStore.delete("whatsapp_phone");
-      return updatedUser;
-    }
-  }
-
-    return originalCreateUser(user);
-  };
-}
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter,
   ...authConfig,
   trustHost: true,
+  debug: true, // Enabled for production debugging
+  logger: {
+    error(code, metadata) {
+      console.error("NEXTAUTH ERROR:", code, metadata);
+    },
+    warn(code) {
+      console.warn("NEXTAUTH WARN:", code);
+    },
+    debug(code, metadata) {
+      console.log("NEXTAUTH DEBUG:", code, metadata);
+    },
+  },
   providers: [
     ...authConfig.providers,
     Credentials({
@@ -95,7 +72,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   session: { strategy: "jwt" },
-  debug: process.env.NODE_ENV === "development",
   callbacks: {
     // @ts-expect-error - callbacks might not be present in authConfig
     ...authConfig.callbacks,
