@@ -4,6 +4,8 @@ import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   try {
     const { phone } = await req.json();

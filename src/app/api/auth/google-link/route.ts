@@ -4,6 +4,9 @@ import { users, accounts } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export async function POST(req: Request) {
   try {
     const { google_id, email, name, image } = await req.json();
