@@ -32,35 +32,14 @@ export function generateControlPrompt(state: ConversationState): string {
     .filter(([, v]) => v !== null && v !== "" && (typeof v !== 'object' || Object.keys(v).length > 0))
     .map(([k]) => k);
 
-  const missingFields = getMissingFields(state);
-
   return `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ELIMINATION-FIRST QUESTION ENGINE
+DATA ELIMINATION RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ROLE: Institutional M&A Advisor.
-
-1. DATA ELIMINATION (HARD RULE):
-   - Already Extracted: ${presentFields.join(", ") || "none"}.
-   - If a field is in the list above, you are FORBIDDEN from asking about it.
-   - NO generic template questions.
-
-2. QUESTION PRIORITY (Decision-Level Only):
-   - Priority 1: Deal Structure (Majority/Minority/Buyout)
-   - Priority 2: Strategic Objective (Expansion/Capability/Platform)
-   - Priority 3: Risk Alignment (Regulatory/Dependency/Market)
-   - Priority 4: Investment Flexibility (Only if Valuation is known)
-
-3. CONTEXT-AWARE REWRITE:
-   - Example: If Valuation is ₹400–500 Cr, ask: "Are you flexible within the ${state.valuation || "detected"} range or strictly capped?"
-   - Example: If Sector is Defense, ask about "government contract dependency".
-
-4. MANDATORY RESPONSE FORMAT:
-   1. OPENING (1 line): Sharp summary using DOCUMENT data (e.g., "defense tech acquisition in Mumbai, ₹400–500 Cr range").
-   2. QUESTIONS (Max 3): Use bullet points. Ask ONLY for: ${missingFields.join(", ")}.
-   3. CLOSING: "Share in ranges — no sensitive info required."
-
-5. TONAL RULE: "Ask only what is missing. Everything else is noise."
+1. PREVIOUSLY CAPTURED: ${presentFields.join(", ") || "none"}.
+2. DO NOT ask for any field already listed above.
+3. If the user provides new data, acknowledge it briefly and move to the NEXT missing requirement.
+4. Maintain high deal-desk precision.
 `;
 }
 

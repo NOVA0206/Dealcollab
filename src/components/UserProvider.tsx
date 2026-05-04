@@ -131,14 +131,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     if (!userEmail) return;
 
     console.log("FETCHING PROFILE DATA FROM API FOR:", userEmail);
-    console.log('[ProfileStepper] SUBMITTING PROFILE DATA:', {
-      profile_image_source: profile?.profileImage,
-      is_google_url: profile?.profileImage?.includes('googleusercontent.com')
-    });
+
     
     const response = await fetch('/api/profile');
     if (!response.ok) {
-      console.error("FAILED TO FETCH PROFILE FROM API");
+      const errorText = await response.text();
+      console.error("FAILED TO FETCH PROFILE FROM API", {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText
+      });
       return;
     }
     
@@ -186,7 +188,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         dealSubmitted: prev.dealSubmitted,
       }));
     }
-  }, [session, supabase, profile]);
+  }, [session, status, supabase]); // Removed profile to prevent loop
 
   // Sync with Supabase (REAL DATA)
   useEffect(() => {

@@ -102,14 +102,6 @@ export async function POST(req: NextRequest) {
     } catch (parseErr) {
       const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
       console.error('[PARSE] Extraction failed:', errMsg);
-
-      // Give specific guidance based on error type
-      if (errMsg.includes('IMAGE_BASED_PDF')) {
-        return NextResponse.json({
-          error: 'This PDF is image-based (e.g. a scanned document or presentation). Please save it as a DOCX file and upload that instead.',
-        }, { status: 422 });
-      }
-
       throw new Error(`Extraction failed: ${errMsg}`);
     }
 

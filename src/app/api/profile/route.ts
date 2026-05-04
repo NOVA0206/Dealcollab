@@ -4,37 +4,51 @@ import { auth } from '@/auth';
 import { validateFullProfile, ProfileFormData } from '@/lib/validation/profile';
 import { calculateProfileCompletion } from '@/lib/profileCompletion';
 
-export async function GET() {
-  const supabase = createServerSupabaseClient();
-  if (!supabase) {
-    console.error('[PROFILE GET] Supabase init failed:', {
-      hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    });
-    return NextResponse.json({ error: 'Database not configured. Check Vercel environment variables.' }, { status: 503 });
-  }
-  const session = await auth();
-  
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+export const dynamic = 'force-dynamic';
 
+export async function GET(_req: NextRequest) {
   try {
+    const supabase = createServerSupabaseClient();
+    if (!supabase) {
+      console.error('[PROFILE GET] Supabase init failed:', {
+        hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      });
+      return NextResponse.json({ error: 'Database not configured. Check Vercel environment variables.' }, { status: 503 });
+    }
+
+    const session = await auth();
+    console.log('[PROFILE GET] Session check:', { 
+      hasSession: !!session, 
+      userEmail: session?.user?.email,
+      userId: session?.user?.id 
+    });
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const email = session.user.email.trim().toLowerCase();
+    console.log('[PROFILE GET] Fetching user by email:', email);
 
     const { data: initialProfile, error: dbError } = await supabase
       .from("users")
       .select("*")
       .ilike("email", email)
       .maybeSingle();
-
-    let profile = initialProfile;
-
+    
     if (dbError) {
-      console.error("Supabase error:", dbError);
+      console.error('[PROFILE GET] Database error:', dbError);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
+
+    console.log('[PROFILE GET] Initial profile result:', { 
+      found: !!initialProfile,
+      id: initialProfile?.id
+    });
+
+    let profile = initialProfile;
 
     if (!profile) {
       const nameFallback = session.user.name || email.split("@")[0];
@@ -89,9 +103,8 @@ export async function GET() {
 
     return NextResponse.json(profileData);
   } catch (error: unknown) {
-    console.error("FULL ERROR:", error);
-    console.error("STRINGIFIED:", JSON.stringify(error, null, 2));
-    const errorMessage = error instanceof Error ? error.message : (typeof error === 'string' ? error : JSON.stringify(error));
+    console.error("FULL ERROR IN PROFILE GET:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@
 
 export interface ConversationState {
   sector: string | null;
+  sub_sector: string | null;
   geography: string | null;
   deal_size: string | null;
   revenue: string | null;
@@ -29,6 +30,7 @@ export interface IntelligenceState {
 
 export const INITIAL_STATE: ConversationState = {
   sector: null,
+  sub_sector: null,
   geography: null,
   deal_size: null,
   revenue: null,
