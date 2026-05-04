@@ -1,9 +1,9 @@
-import NextAuth from "next-auth";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import authConfig from "./auth.config";
 import { db } from "./db";
 import { accounts, sessions, users, verificationTokens } from "./db/schema";
-import authConfig from "./auth.config";
-import Credentials from "next-auth/providers/credentials";
 
 // Debug logging for Production/Vercel (Masked)
 if (process.env.NODE_ENV === "production") {
@@ -52,7 +52,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.phone) return null;
-        
+
         // Find the user by verified phone number
         const user = await db.query.users.findFirst({
           where: eq(users.phone, credentials.phone as string),
@@ -71,15 +71,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  session: { strategy: "jwt" },
+  session: { strategy: "database" },
   callbacks: {
     // @ts-expect-error - callbacks might not be present in authConfig
     ...authConfig.callbacks,
     async signIn({ user }) {
+      console.log("SIGNIN FLOW:", { userId: user.id, userEmail: user.email });
       if (!user.id) return true;
 
       const cookieStore = await cookies();
       const whatsappPhone = cookieStore.get("whatsapp_phone")?.value;
+      console.log("SIGNIN WHATSAPP CHECK:", { whatsappPhone });
 
       if (whatsappPhone) {
         const existingUserWithPhone = await db.query.users.findFirst({
@@ -90,18 +92,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (existingUserWithPhone && existingUserWithPhone.id !== user.id) {
           // If the conflict is with a placeholder, delete the placeholder and take the phone
           if (existingUserWithPhone.email?.endsWith('@dealcollab.ai')) {
+            console.log("SIGNIN: Deleting placeholder user", existingUserWithPhone.id);
             await db.delete(users).where(eq(users.id, existingUserWithPhone.id));
           } else {
             // Actual conflict with another real user
-            return "/?error=phone_linked_to_other";
+            console.warn("SIGNIN CONFLICT: Phone already linked to another user", { 
+              whatsappPhone, 
+              existingUserId: existingUserWithPhone.id,
+              currentUserId: user.id
+            });
+            // DO NOT return a string here as it causes a redirect loop in App Router
+            return false; 
           }
         }
 
         // Link the phone to this real Google user
+        console.log("SIGNIN: Linking phone to user", { userId: user.id, phone: whatsappPhone });
         await db.update(users)
-          .set({ 
-            phone: whatsappPhone, 
-            isPhoneVerified: true 
+          .set({
+            phone: whatsappPhone,
+            isPhoneVerified: true
           })
           .where(eq(users.id, user.id));
 
