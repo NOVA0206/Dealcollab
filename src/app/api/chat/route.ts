@@ -333,7 +333,8 @@ export async function POST(req: NextRequest) {
     const updatedState = updateStateFromExtraction(
       storedState,
       extraction as unknown as { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
-      message
+      message,
+      modulesLoaded
     );
 
     // 🛡️ PHASE LOCK: If we were in MOMENTUM, stay in MOMENTUM (unless complete)
