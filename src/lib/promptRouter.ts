@@ -261,7 +261,64 @@ export function updateStateFromExtraction(
   return updated;
 }
 
+
+/**
+ * Called when a document is uploaded and pre-parsed.
+ * Seeds state from structured extraction so the bot skips
+ * redundant questions on turn 1.
+ */
+export function initializeStateFromDocument(
+  structuredData: Record<string, unknown>,
+): RouterState {
+  const state = createBlankState();
+
+  const intent = structuredData.intent as DealIntent ?? null;
+  const sectorStr = structuredData.sector as string ?? '';
+  const location = structuredData.geography as string ?? structuredData.location as string ?? '';
+
+  if (intent) state.intent = intent;
+  if (sectorStr) {
+    const raw = sectorStr.toLowerCase().trim();
+    const validKey = VALID_SECTOR_KEYS.find(k => k === raw);
+    if (validKey) {
+      state.sector = validKey;
+    } else {
+      state.sector = detectSectorFromText(sectorStr);
+    }
+  }
+  if (location) state.geography = location;
+
+  if (structuredData.sub_sector) state.sub_sector = String(structuredData.sub_sector);
+  if (structuredData.deal_size) state.deal_size = String(structuredData.deal_size);
+  if (structuredData.revenue) state.revenue = String(structuredData.revenue);
+  if (structuredData.structure) state.structure = String(structuredData.structure);
+
+  if (structuredData.company_overview) {
+    state.industry_data = {
+      ...state.industry_data,
+      company_overview: structuredData.company_overview,
+    };
+  }
+
+  // M4 gate rule: even with document, m4_questions_asked starts false
+  // to ensure the bot reviews and asks relevant sector refinements.
+  state.m4_questions_asked = false;
+
+  const hasIndustrySignal = !!(state.sector || state.sub_sector);
+  const qualifyingFields = [
+    !!(state.revenue || state.deal_size),
+    !!(state.structure || state.intent),
+    !!(state.geography),
+  ].filter(Boolean).length;
+
+  state.is_sufficient = hasIndustrySignal && qualifyingFields >= 2 && state.m4_questions_asked;
+  state.phase = resolvePhase(state);
+
+  return state;
+}
+
 function resolvePhase(state: RouterState): ConversationPhase {
+
   if (state.is_profile_search) return 'PROFILE_SEARCH';
   if (state.is_complete) return 'CLOSURE';
   if (state.is_sufficient && state.refinement_count >= 3) return 'CLOSURE';
