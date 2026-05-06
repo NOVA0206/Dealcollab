@@ -92,20 +92,6 @@ export async function POST(req: NextRequest) {
     const supabase = await createServerSupabaseClient();
     if (!supabase) throw new Error("Supabase client failed to initialize");
 
-    // 🔥 PERSISTENT CONTEXT: If no document text but documentId is present, fetch it
-    if (!documentText && (documentId || activeChatId)) {
-      const { data: doc } = await supabase
-        .from('documents')
-        .select('extracted_text')
-        .eq('id', documentId || (await supabase.from('chat_sessions').select('document_id').eq('id', activeChatId).single()).data?.document_id)
-        .single();
-
-      if (doc?.extracted_text) {
-        documentText = doc.extracted_text;
-        console.log(`[PERSISTENCE] Restored context from DB (${documentText.length} chars)`);
-      }
-    }
-
     if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 });
 
     // 2. SESSION & MESSAGE PERSISTENCE
@@ -149,15 +135,17 @@ export async function POST(req: NextRequest) {
     let storedState: RouterState = createBlankState();
 
     // Consistency Guard: If chatId is missing but documentId is present, try to find the seeded session
-    if (!activeChatId && documentId) {
+    if (!activeChatId && (documentId || body.documentId)) {
+      const docIdToSearch = documentId || body.documentId;
+      console.log(`[STATE] No activeChatId, searching for seeded session with documentId: ${docIdToSearch}`);
       const { data: seededSession } = await supabase
         .from("chat_sessions")
         .select("id, state")
-        .eq("document_id", documentId)
+        .eq("document_id", docIdToSearch)
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (seededSession) {
         activeChatId = seededSession.id;
@@ -168,6 +156,7 @@ export async function POST(req: NextRequest) {
 
     // Standard session loading if chatId exists
     if (activeChatId) {
+      console.log(`[STATE] Loading existing session: ${activeChatId}`);
       const { data: existingSession } = await supabase
         .from("chat_sessions")
         .select("id, document_id, state")
@@ -175,10 +164,30 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (!existingSession) {
-        console.log("[STATE] Provided chatId not found, resetting");
+        console.log("[STATE] Provided chatId not found, checking for last active session...");
         activeChatId = null;
       } else {
         storedState = (existingSession.state as unknown as RouterState) || createBlankState();
+        console.log(`[STATE] Loaded state for phase: ${storedState.phase} | turn: ${storedState.turn_count}`);
+      }
+    }
+
+    // 🔥 FINAL FALLBACK: If no chatId or documentId, try to find the absolute most recent session for this user
+    // This prevents generic "Welcome" if the user simply refreshes without a clean URL state
+    if (!activeChatId) {
+      console.log(`[STATE] No session found, attempting last active recovery for user: ${userId}`);
+      const { data: lastSession } = await supabase
+        .from("chat_sessions")
+        .select("id, state")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastSession) {
+        activeChatId = lastSession.id;
+        storedState = (lastSession.state as unknown as RouterState) || createBlankState();
+        console.log(`[STATE] Recovered last active session: ${activeChatId} | Phase: ${storedState.phase}`);
       }
     }
 
@@ -198,6 +207,32 @@ export async function POST(req: NextRequest) {
 
       if (sessionErr) throw new Error(sessionErr.message);
       activeChatId = newSession.id;
+    }
+
+    // 🔥 PERSISTENT CONTEXT RESTORATION (Moved after session recovery)
+    // If no document text but activeChatId is now present, fetch the linked document
+    if (!documentText && activeChatId) {
+      console.log(`[PERSISTENCE] Attempting to restore document context for chat: ${activeChatId}`);
+      const { data: sessionDoc } = await supabase
+        .from('chat_sessions')
+        .select('document_id')
+        .eq('id', activeChatId)
+        .maybeSingle();
+
+      const docId = documentId || sessionDoc?.document_id;
+
+      if (docId) {
+        const { data: doc } = await supabase
+          .from('documents')
+          .select('extracted_text')
+          .eq('id', docId)
+          .maybeSingle();
+
+        if (doc?.extracted_text) {
+          documentText = doc.extracted_text;
+          console.log(`[PERSISTENCE] Successfully restored context from DB (${documentText.length} chars)`);
+        }
+      }
     }
 
     // 3. PERSIST USER MESSAGE
@@ -278,12 +313,19 @@ export async function POST(req: NextRequest) {
     console.log("🧠 FINAL DATA:", aiContent);
 
     // 6. UPDATE STATE & PERSIST ASSISTANT RESPONSE
+    // 🛡️ STATE HYDRATION GUARD: Ensure we don't lose previously extracted data
     const updatedState = updateStateFromExtraction(
       storedState,
       extraction as unknown as { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
       message,
       detectedConditions
     );
+
+    // 🛡️ PHASE LOCK: If we were in MOMENTUM, stay in MOMENTUM (unless complete)
+    if (storedState.phase === 'MOMENTUM' && updatedState.phase !== 'CLOSURE' && !updatedState.is_complete) {
+      updatedState.phase = 'MOMENTUM';
+      updatedState.is_sufficient = true; // Maintain sufficiency
+    }
 
     const { error: assistantMsgErr } = await supabase
       .from("chat_messages")

@@ -178,6 +178,24 @@ export function updateStateFromExtraction(
     updated.special_conditions = [...new Set([...current.special_conditions, ...newConditions])];
   }
 
+  // 🛡️ NON-REGRESSIVE GUARD: Never lose sufficiency once achieved
+  if (current.is_sufficient && !updated.is_sufficient && !updated.is_complete) {
+    console.log("[GUARD] Preventing sufficiency regression. Restoring is_sufficient = true");
+    updated.is_sufficient = true;
+  }
+
+  // 🛡️ PHASE LOCK: Prevent falling back from MOMENTUM to ENTRY/QUALIFICATION
+  const currentPhaseOrder = ['ENTRY', 'QUALIFICATION', 'MOMENTUM', 'CLOSURE', 'PROFILE_SEARCH'];
+  const oldPhaseIdx = currentPhaseOrder.indexOf(current.phase);
+  const newPhaseIdx = currentPhaseOrder.indexOf(updated.phase);
+  
+  if (current.phase === 'MOMENTUM' && updated.phase !== 'CLOSURE' && !updated.is_complete) {
+    updated.phase = 'MOMENTUM';
+  } else if (newPhaseIdx < oldPhaseIdx && updated.phase !== 'PROFILE_SEARCH' && !updated.is_complete) {
+    console.log(`[GUARD] Preventing phase regression from ${current.phase} to ${updated.phase}`);
+    updated.phase = current.phase;
+  }
+
   return updated;
 }
 
@@ -246,6 +264,13 @@ Return ONLY valid JSON. No preamble, no markdown, no fences.
   "special_conditions": ["DEBT_FREE", "ROC_COMPLIANT"]
 }
 Extract every available field from the conversation. Never leave a field null if the information is present.
+
+# LIVE INTENT PRIORITY (CRITICAL)
+1. ALWAYS prioritize the CURRENT user message over historical context or uploaded documents.
+2. If the user introduces a new intent, sector, or direction, FOLLOW THE NEW INTENT.
+3. Use the document context ONLY to avoid asking redundant questions.
+4. Keep trust/confidentiality messaging secondary and compressed.
+5. Do NOT repeat document summaries unless explicitly asked.
 `.trim();
 
 // M2 Phase Rules removed (now imported from ./M2_phaseRules)
@@ -286,7 +311,20 @@ export function buildSystemPrompt(state: RouterState, matchedMandates: string | 
     }
   }
 
-  const phaseContext = `\n# CURRENT CONVERSATION PHASE: ${state.phase}\n# TURN: ${state.turn_count + 1} | REFINEMENTS USED: ${state.refinement_count}/3`;
+  const phaseContext = `
+# SYSTEM COMMAND: LIVE USER INTENT PRIORITY
+1. Focus on the LAST user message first.
+2. If the user changes direction (e.g. from buying to selling), override the previous state.
+3. Use previous document context only as a background reference.
+
+# TONE & VERBOSITY GUARD
+1. If TURN > 1, skip the full platform self-description.
+2. Only mention confidentiality if the user expresses hesitation or if specifically requested by the phase rules.
+3. Be sharp and transactional. No "I hope this helps" or "Great to hear".
+
+# CURRENT CONVERSATION PHASE: ${state.phase}
+# TURN: ${state.turn_count + 1} | REFINEMENTS USED: ${state.refinement_count}/3`;
+
   const systemPrompt = [phaseContext, ...modules.map(m => m.content)].join('\n\n---\n\n');
   const tokenEstimate = Math.round(systemPrompt.length / 4);
 

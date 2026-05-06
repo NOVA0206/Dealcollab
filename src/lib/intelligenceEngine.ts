@@ -69,12 +69,14 @@ export async function processIntelligence(
     const docText = documentText!.trim().slice(0, 8000); 
     const userQuestion = message.trim();
     
-    userContent = `[CONTEXT: DOCUMENT UPLOADED]
+    userContent = `### PRIMARY TASK: RESPOND TO LIVE USER INPUT
+User Message: "${userQuestion || "Please extract all relevant deal data from this document and structure it according to your instructions."}"
+
+### SUPPORTING CONTEXT (HISTORICAL DOCUMENT)
+The following text is from a previously uploaded document. Use it ONLY to enrich the response or avoid repeating questions. Do NOT let it dominate the response if the user's live message introduces a new intent.
 ---
 ${docText}
----
-
-User Input: ${userQuestion || "Please extract all relevant deal data from this document and structure it according to your instructions."}`;
+---`;
   } else {
     userContent = message;
   }
