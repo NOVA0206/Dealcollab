@@ -6,9 +6,9 @@ import { normalizeMessage } from '@/lib/normalizeMessage';
 import {
   buildSystemPrompt,
   createBlankState,
-  updateStateFromExtraction,
   detectIntentFromText,
   detectSectorFromText,
+  updateStateFromExtraction,
   type DealIntent,
   type RouterState
 } from '@/lib/promptRouter';

@@ -17,6 +17,7 @@
  *   ✔ Qualification: grouped question format, industry signal gate,
  *                    buyer relevance surfacing, follow-up limits
  *   ✔ Sufficiency check: the exact transition trigger
+ *   ✔ M4 mandatory gate: sector questions required before momentum
  *   ✔ Momentum: 4-step format, acknowledgement rule, stop condition
  *   ✔ Closure: mandatory verbatim message + post-closure redirect
  *   ✔ Special cases: strategic queries, out of scope, multi-deal,
@@ -30,12 +31,15 @@
  * Load rule: ALWAYS. Every request, every phase, every path.
  * Token ceiling: 700 tokens.
  *
- * V3 override note:
- *   V2 §6C mandated 3-block structure for EVERY response.
- *   V3 §6C post-threshold override explicitly supersedes this.
- *   Resolution: 3-block format applies to the FIRST grouped interaction
- *   only. Once the user has responded once, switch to targeted single
- *   asks. V3 governs post-threshold behaviour without exception.
+ * CHANGE LOG (v2):
+ *   - Added M4 MANDATORY GATE block inside SUFFICIENCY_CHECK.
+ *     Rationale: when user provides core fields (intent + geography +
+ *     deal size) in their opening message, the old sufficiency check
+ *     would fire immediately and push the bot into MOMENTUM — skipping
+ *     sector-specific (M4) questions entirely. The mandatory gate
+ *     requires m4_questions_asked = true before momentum is allowed.
+ *     Even if core fields are complete on turn 1, the bot must surface
+ *     M4 questions in that same response and wait for the user's answer.
  */
 
 // ─────────────────────────────────────────────────────────────
@@ -76,15 +80,35 @@ Follow-Ups: ask only missing fields · prioritise industry signal · max 2 round
 // ─────────────────────────────────────────────────────────────
 // PHASE 3 — SUFFICIENCY CHECK (transition trigger)
 // Source: V3 §6 step 5, step 6
-// ~80 tokens
+// UPDATED v2: added M4 mandatory gate
+// ~140 tokens
 // ─────────────────────────────────────────────────────────────
 const SUFFICIENCY_CHECK = `
 ## SUFFICIENCY CHECK — transition trigger (V3 §5–6)
-Evaluate after every user response. Proceed to Momentum when:
+Evaluate after every user response. Proceed to Momentum when ALL of:
   ✔ Industry signal present (MANDATORY)
   ✔ Any 2 of: [revenue/deal size] · [deal structure/intent type] · [geography]
-If not met: ask only the specific missing input (1–2 fields). After 2 pre-threshold follow-ups, proceed anyway.
-Once met: STOP structured blocks immediately. Switch to Momentum Mode.
+  ✔ m4_questions_asked = true (MANDATORY — see M4 gate below)
+
+If core fields are met but m4_questions_asked is still false:
+  → Do NOT switch to Momentum yet.
+  → Acknowledge inputs and ask M4 sector questions in the same response.
+  → Set m4_questions_asked = true in that response's JSON output.
+  → Wait for user to answer before transitioning.
+
+## M4 MANDATORY GATE (v2)
+Sector-specific (M4) questions are non-negotiable — even when the user
+provides intent + geography + deal size in their opening message.
+Skipping M4 produces weak mandates that match poorly.
+
+When the user's first message already contains all core fields:
+  1. Acknowledge their inputs briefly (one line synthesis).
+  2. Immediately ask the 2–4 most relevant M4 sector questions in the
+     same response. Do not defer to the next turn.
+  3. Set m4_questions_asked = true.
+  4. Only after the user answers those M4 questions may you enter Momentum.
+
+If not met after 2 pre-threshold follow-ups: proceed to Momentum anyway.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -136,7 +160,7 @@ const SPECIAL_CASES = `
 Strategic query: 2 sentences max → pivot to "Share [missing field] to identify the right counterparty."
 Out of scope: "DealCollab focuses on M&A and deal-sourcing. Working on a deal? I can help structure it."
 Multi-deal: "We process one deal at a time. Start a new conversation for your second requirement."
-Document intake (pre-seeded): skip grouped block · open with extracted summary · ask ONE verification question · if sufficient enter Momentum directly.
+Document intake (pre-seeded): skip grouped block · open with extracted summary · ask ONE verification question · if sufficient AND m4_questions_asked = true, enter Momentum directly · otherwise ask M4 questions first.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -159,14 +183,14 @@ export const M2_PHASE_RULES: string = [
 
 export const M2_DIAGNOSTICS = {
   blocks: {
-    phase_entry:       Math.round(PHASE_ENTRY.length / 4),
+    phase_entry: Math.round(PHASE_ENTRY.length / 4),
     phase_qualification: Math.round(PHASE_QUALIFICATION.length / 4),
     sufficiency_check: Math.round(SUFFICIENCY_CHECK.length / 4),
-    phase_momentum:    Math.round(PHASE_MOMENTUM.length / 4),
-    phase_closure:     Math.round(PHASE_CLOSURE.length / 4),
-    special_cases:     Math.round(SPECIAL_CASES.length / 4),
+    phase_momentum: Math.round(PHASE_MOMENTUM.length / 4),
+    phase_closure: Math.round(PHASE_CLOSURE.length / 4),
+    special_cases: Math.round(SPECIAL_CASES.length / 4),
   },
-  total:    Math.round(M2_PHASE_RULES.length / 4),
+  total: Math.round(M2_PHASE_RULES.length / 4),
   loadRule: 'ALWAYS',
 } as const;
 
@@ -181,19 +205,21 @@ export const M2_DIAGNOSTICS = {
  * 1. ENTRY           — first in context: governs how the very first turn starts
  * 2. QUALIFICATION   — second: governs all pre-threshold interactions
  * 3. SUFFICIENCY     — third: the exact trigger that ends qualification
+ *                      now includes M4 mandatory gate (v2)
  * 4. MOMENTUM        — fourth: governs all post-threshold interactions
- * 5. CLOSURE         — fifth: terminal state + verbatim message must be late
- *                      so the LLM reads the full flow before reaching it
+ * 5. CLOSURE         — fifth: terminal state + verbatim message
  * 6. SPECIAL CASES   — last: edge cases that override normal flow
  *
- * KEY DESIGN DECISIONS ENCODED HERE
- * ───────────────────────────────────
- * • V3 overrides V2 §6C post-threshold: 3-block format = first interaction only
- * • Buyer relevance is VISIBLE (one sentence before questions) — user decision
- * • Post-closure = session over, redirect to new conversation — user decision
- * • Multi-deal = edge case, one message redirect — user decision
- * • Document intake = skip grouped block, straight to acknowledgement + verify
- * • Pre-threshold follow-up cap: 2 rounds (V1 §11)
- * • Post-threshold refinement cap: 3 questions (V3 §6F)
- * • Total max interactions before closure: 5
+ * KEY DESIGN DECISIONS (v2 additions)
+ * ─────────────────────────────────────
+ * • M4 gate added to SUFFICIENCY_CHECK:
+ *   Previous behaviour — user sends "buy-side, hospital, Pune, ₹50–100 Cr"
+ *   in one message → sufficiency fires → MOMENTUM → no sector questions asked.
+ *   New behaviour — same message → bot acknowledges + asks M4 hospital
+ *   questions → sets m4_questions_asked = true → user answers → MOMENTUM.
+ *   Result: every mandate has at least one round of sector-specific intel.
+ *
+ * • Document intake special case updated to include M4 gate check.
+ *   Pre-seeded state from document may satisfy core fields but M4 questions
+ *   still need to be asked unless already present in document content.
  */

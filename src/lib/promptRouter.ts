@@ -1,28 +1,27 @@
 /**
  * DealCollab Prompt Router
  * ========================
- * Canonical instruction set: V1 (base) + V2 additions + V3 additions
+ * CHANGE LOG (v3.6):
  *
- * Architecture:
- *   M0  Output schema          — always loaded
- *   M1  Core identity          — always loaded (./M1_coreIdentity)
- *   M2  Phase rules            — always loaded (./M2_phaseRules)
- *   M3  Intent qualification   — one sub-module per intent (./M3_intentFrameworks)
- *   M4  Sector intelligence    — one sub-module per sector (./M4_sectorIntel)
- *   M5  Deal matching          — loaded when is_sufficient=true (./M5_dealMatching)
- *   M6  Profile intelligence   — loaded when profile_search detected; replaces M3/M4/M5
+ *   FIX 1 — M3_SELL_SIDE formatting: intermediary question on its own line
+ *     Problem: "Are you the business owner...? To position this correctly..."
+ *     merged into one run-on sentence.
+ *     Fix: Intermediary question and opening line are now explicitly separated
+ *     with a blank line instruction so LLM renders them on separate lines.
  *
- * DB REQUIREMENT:
- *   ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS state JSONB DEFAULT '{}';
+ *   FIX 2 — M4_PHARMA BUY_SIDE: sub-type question instead of type question
+ *     Problem: "What kind of healthcare business — hospital, clinic, diagnostic?"
+ *     re-asked target type when user already said "hospital".
+ *     Fix: First question changed to ask SUB-TYPE: "What type of hospital —
+ *     multispecialty, specialty, or standalone single-specialty?"
+ *     Added M0 rule: if user specified target type, ask sub-type not type.
+ *     Same fix applied to other M4 BUY_SIDE modules where relevant.
+ *
+ *   M5 INTEGRATION — improved presentation template
+ *     buildM5_Matching now produces a cleaner match card format.
+ *     Includes match count, per-match context, anonymous presentation,
+ *     connection CTA, and no-match handling.
  */
-
-import { M1_CORE_IDENTITY } from './M1_coreIdentity';
-import { M2_PHASE_RULES } from './M2_phaseRules';
-import { M3_MODULES } from './M3_intentFrameworks';
-import { M4_MODULES, type SectorKey } from './M4_sectorIntel';
-import { M5_DEAL_MATCHING } from './M5_matchingLayer';
-
-export type { SectorKey };
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -35,6 +34,21 @@ export type DealIntent =
   | 'DEBT'
   | 'STRATEGIC_PARTNERSHIP'
   | null;
+
+export type SectorKey =
+  | 'pharma'
+  | 'manufacturing'
+  | 'saas'
+  | 'finserv'
+  | 'consumer'
+  | 'realestate'
+  | 'logistics'
+  | 'education'
+  | 'chemicals'
+  | 'hospitality'
+  | 'renewable'
+  | 'defence'
+  | 'mixed';
 
 export type ConversationPhase =
   | 'ENTRY'
@@ -53,12 +67,11 @@ export interface RouterState {
   revenue: string | null;
   structure: string | null;
   intent_focus: string | null;
-  is_intermediary: boolean | null;  // null = not yet asked, true = advisor, false = owner
   industry_data: Record<string, unknown>;
-  special_conditions: string[];
   is_sufficient: boolean;
   is_complete: boolean;
   is_profile_search: boolean;
+  m4_questions_asked: boolean;
   phase: ConversationPhase;
   turn_count: number;
   refinement_count: number;
@@ -74,101 +87,65 @@ export function createBlankState(): RouterState {
     revenue: null,
     structure: null,
     intent_focus: null,
-    is_intermediary: null,
     industry_data: {},
-    special_conditions: [],
     is_sufficient: false,
     is_complete: false,
     is_profile_search: false,
+    m4_questions_asked: false,
     phase: 'ENTRY',
     turn_count: 0,
     refinement_count: 0,
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// SPECIAL CONDITIONS EXTRACTOR
-// Inline — no external dependency required
-// ─────────────────────────────────────────────────────────────
-
-function extractSpecialConditions(message: string): string[] {
-  const lower = message.toLowerCase();
-  const conditions: string[] = [];
-  if (lower.includes('debt free') || lower.includes('debt-free') || lower.includes('no debt'))
-    conditions.push('DEBT_FREE');
-  if (lower.includes('roc compliant') || lower.includes('roc-compliant'))
-    conditions.push('ROC_COMPLIANT');
-  if (lower.includes('fssai') || lower.includes('fssai compliant'))
-    conditions.push('FSSAI_COMPLIANT');
-  if (lower.includes('no litigation') || lower.includes('litigation free'))
-    conditions.push('LITIGATION_FREE');
-  if (lower.includes('promoter exit') || lower.includes('full exit'))
-    conditions.push('FULL_PROMOTER_EXIT');
-  return conditions;
-}
+export const VALID_SECTOR_KEYS: SectorKey[] = [
+  'pharma', 'manufacturing', 'saas', 'finserv', 'consumer',
+  'realestate', 'logistics', 'education', 'chemicals', 'hospitality',
+  'renewable', 'defence', 'mixed',
+];
 
 // ─────────────────────────────────────────────────────────────
-// DETECTORS
-// Keyword-based — run before LLM call on turn 1.
-// Subsequent turns read from stored state.
+// DETECTORS — scoring-based
 // ─────────────────────────────────────────────────────────────
 
-// IMPORTANT: 'hospital', 'clinic', 'healthcare' are in HOSPITALITY not PHARMA.
-// A hospital being sold is a healthcare services deal. A pharma API plant is pharma.
-// Keyword order in this record determines detection priority (first match wins).
 const SECTOR_KEYWORDS: Record<SectorKey, string[]> = {
   pharma: ['pharma', 'pharmaceutical', 'api pharma', 'formulation', 'crams', 'cdmo',
-    'diagnostics', 'medical device', 'drug'],
+    'hospital', 'clinic', 'healthcare', 'diagnostics', 'medical device', 'drug'],
   manufacturing: ['manufactur', 'industrial', 'oem', 'plant', 'factory', 'auto component',
-    'auto parts', 'precision engineering', 'casting', 'forging',
-    // Steel / Cement / Automation absorbed here per M4 design decision
-    'steel', 'tmt', 'rebar', 'foundry', 'rolling mill', 'metal', 'metallurgy',
-    'cement', 'automation', 'iiot', 'robotics', 'industry 4.0', 'iot', 'sensors'],
+    'auto parts', 'precision engineering', 'casting', 'forging'],
   saas: ['saas', 'software', 'tech startup', 'arr', 'mrr', 'b2b software',
-    'platform', 'mobile app', 'cloud', 'enterprise software'],
+    'platform', 'app', 'mobile app', 'cloud', 'enterprise software'],
   finserv: ['nbfc', 'lending', 'fintech', 'financial service', 'insurance',
     'wealth management', 'aum', 'loan book', 'bfsi', 'microfinance',
     'payment', 'neo bank'],
-  consumer: ['consumer brand', 'd2c', 'fmcg', 'retail brand', 'marketplace',
+  consumer: ['consumer brand', 'd2c', 'fmcg', 'retail', 'brand', 'marketplace',
     'ecommerce', 'food brand', 'personal care', 'beauty', 'fashion'],
-  realestate: ['real estate', 'property', 'land parcel', 'commercial property',
+  realestate: ['real estate', 'property', 'land', 'infrastructure', 'commercial property',
     'residential', 'warehousing asset', 'developer', 'reit'],
-  logistics: ['logistics', 'supply chain', 'warehousing', 'freight', 'cold chain',
-    '3pl', 'last mile', 'transport', 'fleet', 'cargo'],
+  logistics: ['logistics', 'supply chain', 'warehousing', 'freight', 'cold chain', '3pl',
+    'last mile', 'transport', 'fleet', 'cargo'],
   education: ['education', 'edtech', 'school', 'college', 'university', 'training',
     'skilling', 'k12', 'higher education', 'test prep', 'coaching'],
   chemicals: ['chemical', 'specialty chemical', 'agrochemical', 'pigment', 'dye',
     'polymer', 'adhesive', 'coating', 'fine chemical'],
-  hospitality: ['hospitality', 'hotel', 'resort', 'restaurant', 'food service', 'qsr',
-    'cafe', 'travel', 'tourism',
-    // Healthcare services (hospital, clinic) belong here — not in pharma
-    'hospital', 'clinic', 'healthcare', 'nursing home', 'multispeciality'],
+  hospitality: ['hospitality', 'hotel', 'restaurant', 'food service', 'qsr', 'cafe',
+    'resort', 'travel', 'tourism'],
   renewable: ['renewable', 'solar', 'wind', 'energy', 'epc', 'ipp', 'power plant',
     'green energy', 'ppa', 'biomass', 'hydro'],
   defence: ['defence', 'defense', 'aerospace', 'drdl', 'drdo', 'hal', 'military',
-    'government tender', 'ordnance', 'security equipment'],
-  agriculture: ['agriculture', 'farming', 'agro processing', 'dairy', 'packaged food',
-    'fssai food', 'distillery', 'ethanol', 'milling', 'flour mill'],
-  textiles: ['textiles', 'garments', 'fabric', 'apparel', 'fashion manufacturing',
-    'weaving', 'knitting', 'spinning', 'narrow woven'],
-  bpo: ['bpo', 'kpo', 'outsourcing', 'staffing', 'manpower', 'it staffing',
-    'shared services', 'call center', 'facility management'],
-  advertising: ['advertising', 'media house', 'ad agency', 'digital marketing', 'dooh',
-    'adtech', 'branding agency', 'performance marketing'],
-  ngo: ['ngo', 'trust', 'society', 'section 8', 'non-profit', 'non profit',
-    '80g', '12a', 'fcra', 'nonprofit'],
-  steel: ['steel', 'iron', 'tmt', 'rebar', 'foundry', 'rolling mill', 'metal', 'metallurgy'],
-  automation: ['automation', 'iiot', 'robotics', 'industry 4.0', 'iot', 'sensors'],
+    'government tender', 'ordnance', 'security equipment',
+    'defence manufactur', 'defense manufactur',
+    'defence company', 'defense company',
+    'defence sector', 'defense sector'],
   mixed: [],
 };
 
 const INTENT_KEYWORDS: Record<Exclude<DealIntent, null>, string[]> = {
   SELL_SIDE: ['sell', 'exit', 'divest', 'divestiture', 'find buyer', 'stake sale',
-    'looking for buyer', 'want to sell', 'selling', 'full sale', 'for sell',
-    'for sale'],
+    'looking for buyer', 'want to sell', 'selling', 'full sale'],
   BUY_SIDE: ['buy', 'acquire', 'acquisition', 'looking to buy', 'find target',
     'roll-up', 'platform acquisition', 'want to acquire', 'purchasing'],
-  FUNDRAISING: ['raise', 'fundraise', 'funding', 'investor', 'equity funding', 'pe fund',
+  FUNDRAISING: ['raise', 'fundraise', 'funding', 'investor', 'equity', 'pe fund',
     'vc fund', 'growth capital', 'pre-ipo', 'series a', 'series b',
     'raise capital'],
   DEBT: ['debt', 'loan', 'working capital', 'ncd', 'structured finance',
@@ -186,11 +163,15 @@ const PROFILE_INTENT_KEYWORDS = [
 
 export function detectSectorFromText(text: string): SectorKey | null {
   const lower = text.toLowerCase();
+  let bestKey: SectorKey | null = null;
+  let bestScore = 0;
   for (const [key, keywords] of Object.entries(SECTOR_KEYWORDS) as [SectorKey, string[]][]) {
     if (key === 'mixed') continue;
-    if (keywords.some(kw => lower.includes(kw))) return key;
+    const score = keywords.filter(kw => lower.includes(kw)).length;
+    if (score > bestScore) { bestScore = score; bestKey = key as SectorKey; }
   }
-  return null;
+  if (bestScore > 0) console.log(`[DETECTOR] Sector scored: ${bestKey} (score: ${bestScore})`);
+  return bestKey;
 }
 
 export function detectIntentFromText(text: string): DealIntent {
@@ -207,76 +188,54 @@ export function detectProfileIntentFromText(text: string): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SUFFICIENCY CHECK
-// FIX: `intent` alone does NOT count as a qualifying field.
-// Intent identifies what the user wants to do — not deal structure.
-// Structure requires the user to explicitly state deal type
-// (full sale / majority stake / minority / full buyout etc.).
-// This prevents premature MOMENTUM entry on turn 1 when the user
-// provides only a one-liner like "I want to sell my hospital in Pune."
-// ─────────────────────────────────────────────────────────────
-
-function checkSufficiency(state: RouterState): boolean {
-  const hasIndustrySignal = !!(state.sector || state.sub_sector);
-  const qualifyingFields = [
-    !!(state.revenue || state.deal_size),
-    !!(state.structure),          // explicit structure only — NOT intent
-    !!(state.geography),
-  ].filter(Boolean).length;
-  return hasIndustrySignal && qualifyingFields >= 2;
-}
-
-// ─────────────────────────────────────────────────────────────
 // STATE MANAGEMENT
 // ─────────────────────────────────────────────────────────────
 
 export function updateStateFromExtraction(
   current: RouterState,
-  extraction: {
-    intent: DealIntent;
-    is_intermediary?: boolean | null;
-    state: Partial<RouterState>;
-    is_complete: boolean;
-    special_conditions?: string[];
-  },
+  extraction: { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
   currentMessage: string,
+  modulesLoaded: string[] = [],
 ): RouterState {
   const updated: RouterState = { ...current };
-
-  // Turn counter
   updated.turn_count = current.turn_count + 1;
 
-  // Profile path detection (sticky — once set, stays for session)
-  if (!updated.is_profile_search) {
+  if (!updated.is_profile_search)
     updated.is_profile_search = detectProfileIntentFromText(currentMessage);
+
+  if (extraction.intent) updated.intent = extraction.intent;
+
+  if (extraction.state.sector) {
+    const raw = (extraction.state.sector as string).toLowerCase().trim();
+    const validKey = VALID_SECTOR_KEYS.find(k => k === raw);
+    if (validKey) {
+      updated.sector = validKey;
+    } else {
+      console.warn(`[ROUTER] Rejected invalid sector "${extraction.state.sector}". Keeping: "${current.sector ?? 'null'}"`);
+    }
   }
 
-  // Merge extracted fields — never overwrite with null if value already exists
-  if (extraction.intent) updated.intent = extraction.intent;
-  if (extraction.state.sector) updated.sector = extraction.state.sector as SectorKey;
   if (extraction.state.sub_sector) updated.sub_sector = extraction.state.sub_sector as string;
   if (extraction.state.geography) updated.geography = extraction.state.geography as string;
   if (extraction.state.deal_size) updated.deal_size = extraction.state.deal_size as string;
   if (extraction.state.revenue) updated.revenue = extraction.state.revenue as string;
   if (extraction.state.structure) updated.structure = extraction.state.structure as string;
   if (extraction.state.intent_focus) updated.intent_focus = extraction.state.intent_focus as string;
-
-  // is_intermediary: only update when LLM has a definitive answer (not null)
-  const extractedIntermediary = extraction.is_intermediary ?? extraction.state.is_intermediary;
-  if (extractedIntermediary !== undefined && extractedIntermediary !== null) {
-    updated.is_intermediary = extractedIntermediary as boolean;
-  }
-
-  // industry_data: deep merge
   if (extraction.state.industry_data &&
     Object.keys(extraction.state.industry_data as object).length > 0) {
-    updated.industry_data = {
-      ...current.industry_data,
-      ...(extraction.state.industry_data as object),
-    };
+    updated.industry_data = { ...current.industry_data, ...(extraction.state.industry_data as object) };
   }
 
-  // Keyword fallbacks (if LLM didn't extract, try keyword detection)
+  if (extraction.state.m4_questions_asked === true) {
+    const m4WasLoaded = modulesLoaded.some(m => m.startsWith('M4_'));
+    if (m4WasLoaded) {
+      updated.m4_questions_asked = true;
+      console.log('[ROUTER] m4_questions_asked=true accepted.');
+    } else {
+      console.warn('[ROUTER] Rejected m4_questions_asked=true — M4 not in prompt this turn.');
+    }
+  }
+
   if (!updated.sector) {
     const detected = detectSectorFromText(currentMessage);
     if (detected) updated.sector = detected;
@@ -286,96 +245,20 @@ export function updateStateFromExtraction(
     if (detected) updated.intent = detected;
   }
 
-  // Special conditions: accumulate (never clear)
-  const newConditions = [
-    ...(extraction.special_conditions || []),
-    ...extractSpecialConditions(currentMessage),
-  ];
-  if (newConditions.length > 0) {
-    updated.special_conditions = Array.from(
-      new Set([...current.special_conditions, ...newConditions]),
-    );
-  }
+  const hasIndustrySignal = !!(updated.sector || updated.sub_sector);
+  const qualifyingFields = [
+    !!(updated.revenue || updated.deal_size),
+    !!(updated.structure || updated.intent),
+    !!(updated.geography),
+  ].filter(Boolean).length;
 
-  // Sufficiency check (fixed — intent does not count as structure)
-  updated.is_sufficient = checkSufficiency(updated);
+  updated.is_sufficient = hasIndustrySignal && qualifyingFields >= 2 && updated.m4_questions_asked;
   updated.is_complete = extraction.is_complete;
-
-  // Refinement counter (only increments during MOMENTUM)
-  if (current.phase === 'MOMENTUM') {
-    updated.refinement_count = current.refinement_count + 1;
-  }
-
-  // Phase resolution
   updated.phase = resolvePhase(updated);
 
-  // ── GUARD 1: Non-regressive sufficiency ──────────────────────
-  // Once sufficient, never go back — prevents state corruption from
-  // partial LLM extraction on follow-up turns.
-  if (current.is_sufficient && !updated.is_sufficient && !updated.is_complete) {
-    console.warn('[ROUTER GUARD] Prevented sufficiency regression — restoring is_sufficient=true');
-    updated.is_sufficient = true;
-    updated.phase = resolvePhase(updated); // re-resolve with corrected sufficiency
-  }
-
-  // ── GUARD 2: Phase lock (no backward movement) ───────────────
-  // Prevents MOMENTUM → QUALIFICATION regression caused by
-  // incomplete state extraction on a given turn.
-  const PHASE_ORDER: ConversationPhase[] = [
-    'ENTRY', 'QUALIFICATION', 'MOMENTUM', 'CLOSURE',
-  ];
-  const prevIdx = PHASE_ORDER.indexOf(current.phase);
-  const nextIdx = PHASE_ORDER.indexOf(updated.phase);
-  if (
-    prevIdx > -1 &&
-    nextIdx > -1 &&
-    nextIdx < prevIdx &&
-    updated.phase !== 'PROFILE_SEARCH' &&
-    !updated.is_complete
-  ) {
-    console.warn(`[ROUTER GUARD] Prevented phase regression: ${current.phase} → ${updated.phase}`);
-    updated.phase = current.phase;
-  }
+  if (current.phase === 'MOMENTUM') updated.refinement_count = current.refinement_count + 1;
 
   return updated;
-}
-
-/**
- * Called when a document is uploaded and pre-parsed.
- * Seeds state from structured extraction so the bot skips
- * redundant questions on turn 1.
- */
-export function initializeStateFromDocument(
-  structuredData: Record<string, unknown>,
-): RouterState {
-  const state = createBlankState();
-
-  const intent = structuredData.intent as DealIntent ?? null;
-  const sector = structuredData.sector as string ?? '';
-  const location = structuredData.geography as string ?? structuredData.location as string ?? '';
-
-  if (intent) state.intent = intent;
-  if (sector) state.sector = detectSectorFromText(sector);
-  if (location) state.geography = location;
-
-  if (structuredData.sub_sector) state.sub_sector = String(structuredData.sub_sector);
-  if (structuredData.deal_size) state.deal_size = String(structuredData.deal_size);
-  if (structuredData.revenue) state.revenue = String(structuredData.revenue);
-  if (structuredData.structure) state.structure = String(structuredData.structure);
-
-  if (structuredData.company_overview) {
-    state.industry_data = {
-      ...state.industry_data,
-      company_overview: structuredData.company_overview,
-    };
-  }
-
-  state.is_sufficient = checkSufficiency(state);
-  state.phase = state.is_sufficient
-    ? 'MOMENTUM'
-    : (state.intent || state.sector ? 'QUALIFICATION' : 'ENTRY');
-
-  return state;
 }
 
 function resolvePhase(state: RouterState): ConversationPhase {
@@ -388,7 +271,8 @@ function resolvePhase(state: RouterState): ConversationPhase {
 }
 
 // ─────────────────────────────────────────────────────────────
-// M0 — Output Schema (always loaded, inline)
+// M0 — Output Schema
+// v3.6: added sub-type rule for BUY_SIDE target questions
 // ─────────────────────────────────────────────────────────────
 
 const M0_OUTPUT_SCHEMA = `
@@ -396,75 +280,605 @@ const M0_OUTPUT_SCHEMA = `
 Return ONLY valid JSON. No preamble, no markdown, no fences.
 {
   "intent": "SELL_SIDE"|"BUY_SIDE"|"FUNDRAISING"|"DEBT"|"STRATEGIC_PARTNERSHIP"|null,
-  "is_intermediary": true|false|null,
   "state": {
-    "sector":            string|null,
-    "sub_sector":        string|null,
-    "geography":         string|null,
-    "deal_size":         string|null,
-    "revenue":           string|null,
-    "structure":         string|null,
-    "intent_focus":      string|null,
-    "industry_data":     {}
+    "sector":             string|null,
+    "sub_sector":         string|null,
+    "geography":          string|null,
+    "deal_size":          string|null,
+    "revenue":            string|null,
+    "structure":          string|null,
+    "intent_focus":       string|null,
+    "industry_data":      {},
+    "m4_questions_asked": boolean
   },
-  "is_complete":         boolean,
-  "special_conditions":  string[],
-  "message":             "YOUR FULL RESPONSE TEXT HERE"
+  "is_complete": boolean,
+  "message": "YOUR FULL RESPONSE TEXT HERE"
 }
 
-Extraction rules:
-• Extract every available field from the conversation. Never leave a field null if information is present.
-• "structure" = explicit deal type stated by user (e.g. "full sale", "majority stake", "minority"). Do NOT populate from intent alone.
-• "is_intermediary": true if user identifies as advisor/banker/CA; false if owner/promoter; null if not yet established.
-• "special_conditions": array of flags like DEBT_FREE, ROC_COMPLIANT, LITIGATION_FREE — only when user explicitly states them.
+STEP 1 — EXTRACT BEFORE WRITING:
+  Fill state fields from everything the user has provided. NEVER ask for a field already given.
+  BUY_SIDE sub-type rule: if user specified target type (e.g., "hospital"), do NOT ask type again.
+  Ask the sub-type instead (e.g., "multispecialty, specialty, or standalone?").
+  Store the sub-type answer in sub_sector field.
 
-# LIVE INTENT PRIORITY
-1. The current user message takes precedence over all prior context and documents.
-2. If the user shifts direction (sell → buy, new sector), follow the new intent immediately.
-3. Use prior document context only to avoid re-asking already-answered questions.
+STEP 2 — CHECK MODULE LIST:
+  Look at: # MODULES IN THIS PROMPT
+  If M4_ listed → your message MUST include separate M4 bullet questions.
+
+STEP 3 — INTENT-AWARE M4 FRAMING:
+  BUY_SIDE / FUNDRAISING → M4 asks "what do you want IN a target?"
+  SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP → M4 asks "what does your existing business look like?"
+
+STEP 4 — MESSAGE FORMAT:
+  Intermediary question: its own line, followed by a blank line.
+  Opening line: its own line, followed by bullets.
+  Each bullet: starts on a new line with \n•
+  Never merge lines. Each sentence or bullet must be on its own line.
+
+SECTOR: exact lowercase keys only.
+  pharma | manufacturing | saas | finserv | consumer | realestate |
+  logistics | education | chemicals | hospitality | renewable | defence | mixed | null
+  hospital/clinic/healthcare → "pharma" | defence/defense/military → "defence"
+
+M4_QUESTIONS_ASKED: TRUE only when M4_ in module list AND message has separate M4 bullets.
+  Once TRUE stays TRUE.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
-// M6 — Profile Intelligence (conditional, inline)
-// Loaded ONLY when is_profile_search = true
-// Replaces M3 / M4 / M5 entirely on this path
+// M1 — Core Identity
+// ─────────────────────────────────────────────────────────────
+
+const M1_CORE_IDENTITY = `
+# ROLE
+You are the DealCollab Deal Intelligence Assistant — a deal qualification engine and matchmaking optimizer.
+Not a generic chatbot, listing platform, or consultant.
+
+# PHILOSOPHY
+- Trust First: never ask for company name or identity early.
+- Matching First: every question improves counterparty discovery.
+- Fewer Interactions, Better Intelligence: group questions. Never one field per reply.
+- Transactional, Not Advisory: two sentences max on strategy questions.
+- Momentum Over Completeness: sector + 2 qualifying fields = sufficient.
+
+# TONE
+Premium. Sharp. Credible. Institutional. Active voice. No hedging. No filler.
+
+# CONFIDENTIALITY
+Remind once: "Your inputs remain confidential. Share in ranges or descriptors — no sensitive details required at this stage."
+
+# FORBIDDEN
+✘ Ask for any field already provided in any prior turn
+✘ For BUY_SIDE: ask target TYPE when user already stated it — ask sub-type instead
+✘ Write bullets without newlines — each bullet MUST start on a new line
+✘ Merge intermediary question with opening line — they must be on separate lines
+✘ Re-ask the full block after user has already responded
+✘ Continue structured questioning after sufficiency met
+✘ List options inside questions — questions must be open-ended
+✘ Banned phrases: "Thank you for the information" | "Thank you for sharing" |
+  "To proceed" | "To move forward" | "Great" | "Absolutely" | "Happy to help" |
+  "Could you share" | "Tell me more" | "As an AI" | "As a chatbot"
+✘ Skip the intermediary question on first turn — always required, always on its own line
+✘ Ignore friction — acknowledge what's captured, ask only the missing piece
+`.trim();
+
+// ─────────────────────────────────────────────────────────────
+// M2 — Conversation Phase Rules
+// ─────────────────────────────────────────────────────────────
+
+const M2_PHASE_RULES = `
+# CONVERSATION PHASE RULES
+
+## PHASE: ENTRY
+Greeting only → "Welcome to DealCollab. Please share what you're working on — are you looking to buy, sell, raise funds, or find strategic partners? Describe your requirement in plain text."
+Direct mandate → qualification immediately. No greetings.
+
+## PHASE: QUALIFICATION (pre-sufficiency)
+
+### Pre-response checklist:
+  1. Read: # CURRENT INTENT
+  2. Read: # MODULES IN THIS PROMPT — if M4_ listed, M4 bullets mandatory
+  3. List what user has already provided. Ask ONLY missing fields.
+  4. For BUY_SIDE: if user stated target type (hospital, school, etc.) — do NOT re-ask type.
+     Ask sub-type and specific requirements instead.
+
+### Message structure — every qualification response:
+  [Intermediary question — its own line, first, non-skippable on first turn]
+
+  [Opening line framing Block 1]
+  \n• [Missing M3 field 1]
+  \n• [Missing M3 field 2]
+
+  [Block 2 intro line]
+  \n• [M4 question 1]
+  \n• [M4 question 2]
+  \n• [M4 question 3]
+
+  [Confidentiality reminder — first interaction only]
+
+### Intent-aware M4 framing:
+  BUY_SIDE / FUNDRAISING:
+    Block 2 intro: "One more set of questions to identify the right counterparties:"
+    Questions ask: what kind of sub-type, what scale, what certifications, what operational profile
+
+  SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+    Block 2 intro: "To position this correctly for relevant buyers, share:"
+    Questions ask: product/model, revenue profile, customer base, defensibility/moat
+
+### If ALL M3 core fields already provided:
+  Skip Block 1. Intermediary question + Block 2 only.
+
+### Friction handling:
+  Synthesise captured → "One more set of questions:" → M4 only. Never re-ask M3.
+
+## M4 MANDATORY GATE
+m4_questions_asked must be TRUE before sufficiency. Set TRUE only when distinct M4 bullets in message.
+
+## PHASE: MOMENTUM (sufficiency met)
+ONE question max. Synthesise → "sufficient to begin identifying counterparties" → one refinement.
+Max 3 refinements before closure.
+
+## PHASE: MATCHING (M5 loaded)
+Present matched counterparties from the data provided. Follow M5 presentation rules exactly.
+After presenting matches, deliver the closure message verbatim.
+
+## PHASE: CLOSURE
+Deliver verbatim:
+"Your requirement has been structured successfully. Your intent is secure and confidential with us.
+This is not deal distribution — this is deal resolution. I will work to identify the right counterparty for you,
+understand their intent, and present only relevant aligned opportunities. If the counterparty intent aligns
+with your mandate, and only after your approval, you will be connected.
+I continuously work across the network 24×7. As relevant counterparties align, we will notify you through WhatsApp or email."
+`.trim();
+
+// ─────────────────────────────────────────────────────────────
+// M3 — Intent Qualification Frameworks
+// v3.6: M3_SELL_SIDE — intermediary + opening on explicit separate lines
+// ─────────────────────────────────────────────────────────────
+
+const M3_SELL_SIDE = `
+## M3: SELL-SIDE QUALIFICATION — Block 1
+
+ALWAYS FIRST — its own line, non-skippable on first turn:
+"Are you the business owner / promoter, or an advisor representing a client?"
+[blank line after this question before the opening line]
+
+Opening line for Block 1 (on its own line, after the intermediary question):
+"To position this correctly for relevant buyers, share:"
+
+Block 1 — ask ONLY fields not yet provided:
+\n• What does the business do, and where does it operate? [SKIP if sector + geography known]
+\n• What is the approximate annual revenue range? [SKIP if revenue known]
+\n• How would you describe the business size and financial profile? [SKIP if deal_size known]
+\n• What kind of transaction are you looking for — and what is driving that decision? [SKIP if structure known]
+
+All questions are open-ended. Do NOT list options inside any question.
+
+Optional: valuation expectation · preferred buyer type · timeline · reason for exit.
+
+MANDATORY: After Block 1, add Block 2 from ## M4 SECTOR INTELLIGENCE. Same message.
+`.trim();
+
+const M3_BUY_SIDE = `
+## M3: BUY-SIDE QUALIFICATION — Block 1
+
+ALWAYS FIRST — its own line, non-skippable on first turn:
+"Are you the acquirer directly, or an advisor running a mandate on behalf of a client?"
+[blank line after this question before the opening line]
+
+Use "you" if user says "I want to buy". Use "your client" only if confirmed advisor.
+
+Opening line for Block 1 (on its own line):
+"To match you with the right target, share:"
+
+Block 1 — ask ONLY fields not yet provided:
+\n• What geography are you targeting for the acquisition? [SKIP if geography known]
+\n• What is the approximate budget or ticket size? [SKIP if deal_size known]
+\n• What kind of deal structure are you looking for — and what is driving that preference? [SKIP if structure known]
+\n• What is the strategic rationale behind this acquisition? [SKIP if intent_focus known]
+
+All questions are open-ended. Do NOT list options.
+
+Optional: urgency · cross-border openness · preferred revenue size of target.
+
+MANDATORY: After Block 1, add Block 2 from ## M4 SECTOR INTELLIGENCE. Same message.
+Block 2 must ask about the TARGET — not the acquirer's business.
+Block 2 must NOT re-ask target type if user already stated it. Ask sub-type instead.
+`.trim();
+
+const M3_FUNDRAISING = `
+## M3: FUNDRAISING QUALIFICATION — Block 1
+
+Disambiguation if unclear: "Are you looking to raise equity or debt?"
+
+ALWAYS FIRST — its own line:
+"Are you the founder / promoter of the business, or an advisor running this raise?"
+
+Opening line: "To identify the right investors for your profile, share:"
+
+Block 1 — ask ONLY fields not yet provided:
+\n• What does the business do, and what stage is it at? [SKIP if known]
+\n• How much are you looking to raise, and what will the capital be used for? [SKIP if deal_size known]
+\n• What kind of funding structure are you open to? [SKIP if structure known]
+\n• What is the current revenue scale or ARR? [SKIP if revenue known]
+
+All questions open-ended. Optional: preferred investor type · existing investors · timeline.
+
+MANDATORY: After Block 1, add Block 2 from ## M4 SECTOR INTELLIGENCE. Same message.
+`.trim();
+
+const M3_DEBT = `
+## M3: DEBT / STRUCTURED FINANCE QUALIFICATION — Block 1
+
+ALWAYS FIRST — its own line:
+"Are you the business seeking the facility, or an advisor arranging it for a client?"
+
+Opening line: "To identify relevant debt providers, share:"
+
+Block 1 — ask ONLY fields not yet provided:
+\n• What does the business do, and what is the funding needed for? [SKIP if known]
+\n• What is the approximate amount you are looking to raise? [SKIP if deal_size known]
+\n• What is the current revenue scale? [SKIP if revenue known]
+\n• What is the collateral position? [SKIP if known]
+
+All questions open-ended. Instrument type → Momentum phase only.
+
+MANDATORY: After Block 1, add Block 2 from ## M4 SECTOR INTELLIGENCE. Same message.
+`.trim();
+
+const M3_STRATEGIC = `
+## M3: STRATEGIC PARTNERSHIP QUALIFICATION — Block 1
+
+ALWAYS FIRST — its own line:
+"Are you representing your own firm directly, or facilitating this as an advisor?"
+
+Opening line: "To identify aligned strategic partners, share:"
+
+Block 1 — ask ONLY fields not yet provided:
+\n• What does your business do, and where does it operate? [SKIP if sector + geography known]
+\n• What kind of partnership or collaboration are you looking for? [SKIP if known]
+\n• What does your business bring, and what are you looking for in a partner? [SKIP if known]
+\n• Where geographically are you looking for a partner? [SKIP if geography known]
+
+Optional: exclusivity · capital contribution · timeline.
+
+MANDATORY: After Block 1, add Block 2 from ## M4 SECTOR INTELLIGENCE. Same message.
+`.trim();
+
+const M3_MODULES: Record<Exclude<DealIntent, null>, string> = {
+  SELL_SIDE: M3_SELL_SIDE,
+  BUY_SIDE: M3_BUY_SIDE,
+  FUNDRAISING: M3_FUNDRAISING,
+  DEBT: M3_DEBT,
+  STRATEGIC_PARTNERSHIP: M3_STRATEGIC,
+};
+
+// ─────────────────────────────────────────────────────────────
+// M4 — Sector Intelligence (Block 2)
+// v3.6: M4_PHARMA BUY_SIDE — first question now asks sub-type not type
+//       Applied same logic to other sectors where relevant
+// ─────────────────────────────────────────────────────────────
+
+const M4_PHARMA = `
+## M4: PHARMA / HEALTHCARE — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+  Sub-type rule: if user said "hospital", do NOT ask hospital vs clinic.
+  Ask: what TYPE of hospital, what scale, what certifications, what profile.
+\n• What type of hospital are you looking for — multispecialty, specialty, or standalone single-specialty?
+\n• What scale of operation matters to you — approximate bed count, revenue range, or patient volume?
+\n• Are specific accreditations or approvals (NABH, NABL) important for the target?
+\n• What operational profile are you looking for — established with doctors in place, or open to a turnaround?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What does the business actually do — hospital, clinic, diagnostic centre, or specialty service?
+\n• What regulatory approvals does the business hold, and how critical are they?
+\n• How concentrated is the revenue — key doctors, institutional contracts, or broad patient base?
+\n• What is the operational scale — bed count, occupancy rate, or patient volumes?
+
+Buyer signals: NABH/NABL · type and scale · operational independence · doctor concentration.
+`.trim();
+
+const M4_MANUFACTURING = `
+## M4: MANUFACTURING / INDUSTRIAL — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What sub-type of manufacturing are you looking for — auto components, precision engineering, industrial equipment, or something else?
+\n• Are specific certifications (ISO, IATF, BIS) required for the target?
+\n• What scale of manufacturing operation matters — capacity, revenue, or headcount?
+\n• Do you need owned plant and machinery, or is contract manufacturing acceptable?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• How does the business primarily generate revenue — who are the end customers?
+\n• What manufacturing infrastructure does the business own or operate?
+\n• What certifications or approvals does it hold, and how central are they?
+\n• How concentrated is the customer base?
+
+Buyer signals: capacity · certifications · customer access · manufacturing moat.
+`.trim();
+
+const M4_SAAS = `
+## M4: SAAS / TECHNOLOGY — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What sub-type of tech business are you looking for — B2B SaaS, IT services, AI product, or data platform?
+\n• What revenue profile matters — strong ARR, or open to project-based businesses?
+\n• Is proprietary IP or a defensible tech moat important for the target?
+\n• What customer type are you looking for — enterprise, SME, or sector-specific?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What does the product or platform do, and who pays for it?
+\n• What does the revenue profile look like — recurring vs project-based?
+\n• What is the customer base like — who are the buyers and how sticky are they?
+\n• What makes the business defensible — proprietary technology, IP, or platform moat?
+
+Buyer signals: recurring revenue · IP defensibility · low churn · enterprise contracts.
+`.trim();
+
+const M4_FINSERV = `
+## M4: FINANCIAL SERVICES / NBFC / FINTECH — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What sub-type of financial services business are you looking for — NBFC, HFC, MFI, wealth management, or fintech?
+\n• Are specific licences (RBI, SEBI, IRDAI) required for the target?
+\n• What loan book or AUM scale are you targeting?
+\n• Is the origination model important — self-sourced vs partnership-driven?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What does the business do and how does it make money?
+\n• What licences or regulatory approvals does it hold, and are they transferable?
+\n• What does the loan book or AUM look like, and what is the portfolio quality?
+\n• How does it originate — self-sourced or partnership-driven?
+
+Buyer signals: licence value · loan book quality · regulatory defensibility.
+`.trim();
+
+const M4_CONSUMER = `
+## M4: CONSUMER BRAND / RETAIL / D2C — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What sub-type of consumer business are you looking for — FMCG brand, D2C, retail chain, or personal care?
+\n• What channel matters — D2C, offline retail, quick commerce, or omnichannel?
+\n• Are you looking for a hero-product brand or a broad SKU portfolio?
+\n• What geographic reach matters — regional or national?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What does the brand sell, and how would you describe the business model?
+\n• How does the business reach customers — what channels drive revenue?
+\n• Is the business built around a few key products or a broad range?
+\n• What is the geographic reach and distribution maturity?
+
+Buyer signals: brand defensibility · repeat purchase · margin quality · channel stability.
+`.trim();
+
+const M4_REALESTATE = `
+## M4: REAL ESTATE / INFRASTRUCTURE — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What type of asset are you looking for — land, development project, or completed income-generating property?
+\n• Is annuity income from tenanted assets important, or are you open to development-stage risk?
+\n• What approval status do you require — fully cleared only, or open to approval risk?
+\n• Are there specific tenant profile or lease tenure requirements?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What is the nature of the asset — land, development project, or completed income property?
+\n• Are all regulatory approvals in place?
+\n• What does the revenue or income profile look like?
+\n• If tenanted, who are the tenants and what are the lease terms?
+
+Buyer signals: title clarity · approval status · annuity stability · tenant quality.
+`.trim();
+
+const M4_LOGISTICS = `
+## M4: LOGISTICS / SUPPLY CHAIN — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What type of logistics business are you looking for — warehousing, fleet, cold chain, freight forwarding, or 3PL?
+\n• Is owned infrastructure important, or is asset-light acceptable?
+\n• Are long-term enterprise contracts a requirement for the target?
+\n• What geographic coverage matters — regional cluster or pan-India?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• Does the business own infrastructure or work asset-light?
+\n• Is revenue built on long-term contracts or transactional volumes?
+\n• Who are the key clients and how concentrated is revenue?
+\n• What geographies and corridors does the business cover?
+
+Buyer signals: contract revenue · infrastructure ownership · route density.
+`.trim();
+
+const M4_EDUCATION = `
+## M4: EDUCATION / EDTECH — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What type of education business are you looking for — K12 school, higher education, edtech platform, or B2B skilling?
+\n• Are specific accreditations (CBSE, university affiliation, NAAC) required for the target?
+\n• What enrolment scale or student base matters?
+\n• Is operational independence from founders important?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What kind of education business is this, and who does it serve?
+\n• What accreditations or approvals does it hold?
+\n• How does the business attract and retain students?
+\n• How dependent is the business on founders or key leadership?
+
+Buyer signals: recurring enrolment · accreditation value · content IP.
+`.trim();
+
+const M4_CHEMICALS = `
+## M4: SPECIALTY CHEMICALS — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What type of chemical business are you looking for — specialty, agrochemical, fine chemicals, or polymers?
+\n• Is export capability important for the target?
+\n• What environmental compliance or approval status do you require?
+\n• Are you looking for a specific end-market or customer base?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What does the business produce — commodity or specialty / niche formulations?
+\n• How much revenue comes from exports, and which markets?
+\n• What is the environmental compliance status?
+\n• How concentrated is the customer base?
+
+Buyer signals: formulation defensibility · export access · compliance moat.
+`.trim();
+
+const M4_HOSPITALITY = `
+## M4: HOSPITALITY / FOOD / RESTAURANTS — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What type of hospitality business are you looking for — hotel, resort, restaurant chain, or QSR?
+\n• Is asset ownership important, or is a leased or managed operation acceptable?
+\n• What performance profile matters — stable occupancy, or open to a turnaround?
+\n• Are you looking for a single flagship location or a multi-location operation?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• Does the business own the asset, or operate under a lease or franchise?
+\n• How has the business performed over the last 2–3 years?
+\n• Is the brand independently owned or franchise-dependent?
+\n• Is revenue concentrated in one location or spread across multiple?
+
+Buyer signals: asset ownership · brand defensibility · location quality · margin stability.
+`.trim();
+
+const M4_RENEWABLE = `
+## M4: RENEWABLE ENERGY — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• Are you looking for an operating IPP, EPC contractor, or development-stage project?
+\n• Is a PPA in place a requirement, or are you open to merchant or development risk?
+\n• What debt profile is acceptable for the target assets?
+\n• What technology type matters — solar, wind, hybrid, or technology-agnostic?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• Is this an operating asset, EPC pipeline, or development-stage project?
+\n• Are PPAs in place — counterparty quality and tenure?
+\n• What is the debt structure on the assets?
+\n• Where does the value sit — operational yield or development upside?
+
+Buyer signals: PPA quality · debt coverage · regulatory approvals.
+`.trim();
+
+const M4_DEFENCE = `
+## M4: DEFENCE / AEROSPACE — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+
+IF INTENT = BUY_SIDE or FUNDRAISING:
+\n• What type of defence business are you looking for — manufacturing, systems integration, UAV, or services?
+\n• Are specific approvals required for the target — DGQA, DRDL, offset credits?
+\n• Is government-tender revenue important, or are OEM partnerships acceptable?
+\n• Is proprietary technology or IP a requirement for the target?
+
+IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
+\n• What approvals, certifications, or offset credits does the business hold?
+\n• How does the business generate revenue — tenders, OEM, or product sales?
+\n• What is the technology or capability moat?
+\n• How diversified is the order book?
+
+Buyer signals: DGQA/DRDO approvals · government relationships · technology moat · offset credits.
+`.trim();
+
+const M4_MIXED = `
+## M4: MIXED / CROSS-SECTOR — Block 2
+Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
+Ask all 3 regardless of intent:
+\n• What is the core revenue driver — product, service, or platform?
+\n• Is the business asset-heavy or asset-light?
+\n• Is revenue primarily contract-based, repeat, or transactional?
+`.trim();
+
+const M4_MODULES: Record<SectorKey, string> = {
+  pharma: M4_PHARMA,
+  manufacturing: M4_MANUFACTURING,
+  saas: M4_SAAS,
+  finserv: M4_FINSERV,
+  consumer: M4_CONSUMER,
+  realestate: M4_REALESTATE,
+  logistics: M4_LOGISTICS,
+  education: M4_EDUCATION,
+  chemicals: M4_CHEMICALS,
+  hospitality: M4_HOSPITALITY,
+  renewable: M4_RENEWABLE,
+  defence: M4_DEFENCE,
+  mixed: M4_MIXED,
+};
+
+// ─────────────────────────────────────────────────────────────
+// M5 — Deal Matching Layer (conditional)
+// v3.6: improved presentation template with clean match cards,
+//       connection CTA, and graceful no-match fallback
+// ─────────────────────────────────────────────────────────────
+
+export function buildM5_Matching(matchedMandates: string | null): string {
+  if (!matchedMandates || matchedMandates.trim().length === 0) {
+    return `
+## M5: NO MATCHES FOUND
+No counterparties are currently in the network that match your mandate.
+Deliver this message verbatim:
+"No matches at this stage. Your mandate has been saved and is running against the network continuously.
+You will be notified via WhatsApp or email when a relevant counterparty is identified — this runs for 90 days."
+Then deliver the mandatory closure message.
+    `.trim();
+  }
+
+  return `
+## M5: DEAL MATCHING MODE
+Mandate is sufficient. Matched counterparties found. Present them now.
+
+### Matched mandates data (anonymous):
+${matchedMandates}
+
+### Presentation rules — follow exactly:
+1. Opening line: "We have identified [N] potentially aligned counterpart[y/ies] in our network."
+2. For each match, present one block:
+   "[Sector] · [Geography] · [Deal size range]"
+   "[One sentence explaining why this is relevant to the user's mandate]"
+3. After all matches:
+   "To connect, send a connection request from your Deal Dashboard.
+   Tokens are only deducted if both parties approve the connection."
+4. Then deliver the mandatory closure message verbatim.
+
+### Rules:
+✘ Never reveal: name · firm · advisor · phone · email · mandate ID
+✘ Never infer identity from sector + geography + size combination
+✔ Show only: sector · geography · size range · one-line relevance reason
+✘ Never fabricate a match
+✘ Never describe the matching algorithm
+`.trim();
+}
+
+// ─────────────────────────────────────────────────────────────
+// M6 — Profile Intelligence (conditional)
 // ─────────────────────────────────────────────────────────────
 
 const M6_PROFILE_INTELLIGENCE = `
 # PROFILE INTELLIGENCE MODE
-The user is looking for a professional, advisor, or deal partner — not submitting a deal mandate.
-This path is completely separate from deal qualification. Do NOT ask deal qualification questions here.
+User is looking for a professional or advisor. Do NOT ask deal qualification questions.
 
-## Your role in this mode
-Match the user's requirement to professional profiles in the DealCollab network based on:
-- Sector expertise (primary sectors declared in their Deal Identity)
-- Deal focus (buy-side, sell-side, fundraising, debt, strategic)
-- Active geographies
-- Professional category (M&A advisor, PE professional, investment banker, CA/CS, legal, corporate strategist)
-- Co-advisory preference and collaboration model
+## Questions (grouped, one interaction):
+"To find the right professional, share:
+\n• What type of professional are you looking for?
+\n• Which sector is this for?
+\n• Geography preference?
+\n• Nature of engagement — one-time, retainer, or transaction-specific?"
 
-## Qualification questions for profile search
-Ask grouped, in one interaction:
-"To find the right professional for your requirement, share:
-• What type of professional are you looking for? (M&A advisor, investment banker, PE professional, legal, CA)
-• Which sector is this for?
-• Geography preference?
-• Nature of engagement — one-time advisory, ongoing retainer, or transaction-specific?"
-
-## Profile presentation rules
-- Present profiles anonymously first: role + sector + geography + deal focus. No name or firm until connection is approved.
-- Frame as: "We have [X] professionals in our network aligned to your requirement."
-- Readiness Score acts as a trust signal — higher score = more active and credible on the platform.
-- Invite connection: "Would you like to connect with any of these profiles?"
-
-## Output
-Set intent_focus = "PROFILE_SEARCH" in the JSON output.
-is_complete = true only after user has been presented with profiles and shown intent to connect.
+Present anonymously: role + sector + geography + deal focus.
+Frame as: "We have [X] professionals aligned to your requirement."
+Set intent_focus = "PROFILE_SEARCH". is_complete = true after interest expressed.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
 // ROUTER — Main composition function
-// Called once per request in the route handler
 // ─────────────────────────────────────────────────────────────
 
 export interface RouterOutput {
@@ -480,145 +894,48 @@ export function buildSystemPrompt(
 ): RouterOutput {
   const modules: Array<{ key: string; content: string }> = [];
 
-  // M0 + M1 + M2 — always loaded
   modules.push({ key: 'M0_output_schema', content: M0_OUTPUT_SCHEMA });
   modules.push({ key: 'M1_core_identity', content: M1_CORE_IDENTITY });
   modules.push({ key: 'M2_phase_rules', content: M2_PHASE_RULES });
 
   if (state.is_profile_search || state.phase === 'PROFILE_SEARCH') {
-    // Profile path — M3/M4/M5 excluded
     modules.push({ key: 'M6_profile_intelligence', content: M6_PROFILE_INTELLIGENCE });
   } else {
-    // Deal path
-
-    // M3 — intent qualification (load once intent is known)
     if (state.intent && M3_MODULES[state.intent]) {
       modules.push({ key: `M3_${state.intent}`, content: M3_MODULES[state.intent] });
     }
-
-    // M4 — sector intelligence (load once sector is known)
     if (state.sector && M4_MODULES[state.sector]) {
       modules.push({ key: `M4_${state.sector}`, content: M4_MODULES[state.sector] });
     }
-
-    // M5 — load whenever is_sufficient=true.
-    // M5 internally handles both match-found and no-match states.
-    // Data is injected as a separate block so M5 module stays static.
+    // M5 loads when sufficient AND real matches exist OR as no-match informer
     if (state.is_sufficient) {
-      const dataBlock = matchedMandates && matchedMandates.trim().length > 0
-        ? `## MATCHED MANDATES (from L5)\n${matchedMandates}`
-        : `## MATCH STATUS: NOT_FOUND`;
-      modules.push({
-        key: 'M5_matching',
-        content: M5_DEAL_MATCHING + '\n\n' + dataBlock,
-      });
+      const m5Content = buildM5_Matching(matchedMandates);
+      modules.push({ key: 'M5_matching', content: m5Content });
     }
   }
 
-  const detectedFields = [
-    state.intent   ? `INTENT: ${state.intent}`   : null,
-    state.sector   ? `SECTOR: ${state.sector}`   : null,
-    state.geography? `GEOGRAPHY: ${state.geography}` : null,
-    state.deal_size? `DEAL SIZE: ${state.deal_size}` : null,
-    state.revenue  ? `REVENUE: ${state.revenue}` : null,
-  ].filter(Boolean).join(' | ');
+  const m4Loaded = modules.some(m => m.key.startsWith('M4_'));
 
-  const phaseInstruction =
-    state.phase === 'ENTRY' && detectedFields
-      ? `Direct mandate received. DO NOT greet or delay. Start qualification NOW.\nAlready known: ${detectedFields}\nDo NOT re-ask these fields. Ask only what is missing from M3 and M4.`
-    : state.phase === 'ENTRY'
-      ? `No mandate yet. Ask the ENTRY greeting per M2 rules.`
-    : state.phase === 'QUALIFICATION'
-      ? `Pre-sufficiency. Ask grouped M3 + M4 questions. Do not repeat already-known fields: ${detectedFields || 'none'}.`
-    : state.phase === 'MOMENTUM'
-      ? `Post-sufficiency. Follow 4-step MOMENTUM format. One refinement question max.`
-    : state.phase === 'CLOSURE'
-      ? `Deliver closure message verbatim. Session complete. Redirect new requirements to fresh conversation.`
-    : state.phase === 'PROFILE_SEARCH'
-      ? `Profile search mode. Use M6 rules only. Do not ask deal qualification questions.`
-    : `Unknown phase. Default to qualification mode.`;
-
-  const phaseContext = `
-# EXECUTION CONTEXT (read before responding)
-PHASE: ${state.phase}
-TURN: ${state.turn_count + 1}
-REFINEMENTS USED: ${state.refinement_count}/3
-IS_SUFFICIENT: ${state.is_sufficient}
-IS_INTERMEDIARY: ${state.is_intermediary ?? 'not yet established'}
-${(state.special_conditions?.length ?? 0) > 0 ? `SPECIAL CONDITIONS: ${state.special_conditions?.join(', ')}` : ''}
-
-INSTRUCTION: ${phaseInstruction}
-
-# TONE & VERBOSITY RULES
-- Turn 1 only: you may briefly acknowledge what you are. All subsequent turns: skip self-description entirely.
-- Only mention confidentiality if the user expresses hesitation or M2 phase rules require it.
-- Never say "I hope this helps", "Great to hear", "Absolutely", or any filler affirmation.
-- Be sharp, transactional, and direct.
-`.trim();
+  const phaseContext = [
+    `\n# CURRENT CONVERSATION PHASE: ${state.phase}`,
+    `# CURRENT INTENT: ${state.intent ?? 'unknown'}`,
+    `# TURN: ${state.turn_count + 1} | REFINEMENTS USED: ${state.refinement_count}/3`,
+    `# M4 QUESTIONS ASKED THIS SESSION: ${state.m4_questions_asked}`,
+    `# MODULES IN THIS PROMPT: ${modules.map(m => m.key).join(', ')}`,
+    m4Loaded
+      ? `# ⚠ M4 IS LOADED — Block 2 sector questions are MANDATORY. Use intent-aware framing.`
+      : `# M4 NOT LOADED — do not produce sector-specific questions this turn`,
+  ].join('\n');
 
   const systemPrompt = [
     phaseContext,
     ...modules.map(m => m.content),
   ].join('\n\n---\n\n');
 
-  const tokenEstimate = Math.round(systemPrompt.length / 4);
-
   return {
     systemPrompt,
     phase: state.phase,
     modulesLoaded: modules.map(m => m.key),
-    tokenEstimate,
+    tokenEstimate: Math.round(systemPrompt.length / 4),
   };
 }
-
-// ─────────────────────────────────────────────────────────────
-// USAGE IN route.ts
-// ─────────────────────────────────────────────────────────────
-
-/*
-
-STEP 1 — Add state column to DB (run once):
-  ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS state JSONB DEFAULT '{}';
-
-STEP 2 — Replace getSystemPrompt() in your POST handler:
-
-  import {
-    buildSystemPrompt,
-    updateStateFromExtraction,
-    createBlankState,
-    type RouterState,
-  } from '@/lib/promptRouter';
-
-  // Read stored state (or blank on first turn):
-  const storedState: RouterState =
-    (existingSession?.state as RouterState) ?? createBlankState();
-
-  // Build system prompt BEFORE the LLM call:
-  const { systemPrompt, modulesLoaded, tokenEstimate } =
-    buildSystemPrompt(storedState, matchedMandatesStr ?? null);
-
-  console.log(`[ROUTER] Modules: ${modulesLoaded.join(', ')} | ~${tokenEstimate} tokens`);
-
-  // Pass systemPrompt into processIntelligence():
-  const extraction = await processIntelligence(
-    message, formattedHistory, documentText, systemPrompt
-  );
-
-  // Update and persist state:
-  const updatedState = updateStateFromExtraction(storedState, extraction, message);
-  await supabase
-    .from('chat_sessions')
-    .update({ state: updatedState })
-    .eq('id', activeChatId);
-
-STEP 3 — Delete the old getSystemPrompt() from route.ts entirely.
-          The promptRouter owns all prompt logic now.
-
-STEP 4 — Ensure these module files exist at the same path level:
-  ./M1_coreIdentity.ts    (exports M1_CORE_IDENTITY: string)
-  ./M2_phaseRules.ts      (exports M2_PHASE_RULES: string)
-  ./M3_intentFrameworks.ts (exports M3_MODULES: Record<DealIntent, string>)
-  ./M4_sectorIntel.ts     (exports M4_MODULES: Record<SectorKey, string>, SectorKey type)
-  ./M5_dealMatching.ts    (exports M5_DEAL_MATCHING: string)
-
-*/

@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/utils/supabase/server';
 import { auth } from '@/auth';
-import { validateFullProfile, ProfileFormData } from '@/lib/validation/profile';
 import { calculateProfileCompletion } from '@/lib/profileCompletion';
+import { ProfileFormData, validateFullProfile } from '@/lib/validation/profile';
+import { createServerSupabaseClient } from '@/utils/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,12 +19,12 @@ export async function GET(_req: NextRequest) {
     }
 
     const session = await auth();
-    console.log('[PROFILE GET] Session check:', { 
-      hasSession: !!session, 
+    console.log('[PROFILE GET] Session check:', {
+      hasSession: !!session,
       userEmail: session?.user?.email,
-      userId: session?.user?.id 
+      userId: session?.user?.id
     });
-    
+
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -37,13 +37,13 @@ export async function GET(_req: NextRequest) {
       .select("*")
       .ilike("email", email)
       .maybeSingle();
-    
+
     if (dbError) {
       console.error('[PROFILE GET] Database error:', dbError);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
 
-    console.log('[PROFILE GET] Initial profile result:', { 
+    console.log('[PROFILE GET] Initial profile result:', {
       found: !!initialProfile,
       id: initialProfile?.id
     });
@@ -179,8 +179,8 @@ export async function POST(req: NextRequest) {
       profile_attachment_url: body.attachmentUrl !== undefined ? body.attachmentUrl : (body.profile_attachment_url !== undefined ? body.profile_attachment_url : currentUser.profile_attachment_url),
       additional_info: body.additionalInfo !== undefined ? body.additionalInfo : currentUser.additional_info,
       // SAFE UPDATE: Prevent overwriting intent/currentFocus with empty values if not provided
-      intent: (body.currentFocus !== undefined && body.currentFocus !== null && body.currentFocus.length > 0) 
-        ? body.currentFocus 
+      intent: (body.currentFocus !== undefined && body.currentFocus !== null && body.currentFocus.length > 0)
+        ? body.currentFocus
         : currentUser.intent,
       profile_completion: currentUser.profile_completion, // Will be updated after this save
       profile_completed_once: currentUser.profile_completed_once,
@@ -189,20 +189,20 @@ export async function POST(req: NextRequest) {
       // STRICT: Only update profile_image if a value is provided in the request
       // and it is NOT a Google avatar URL (Google avatars are fallbacks, not DB values)
       profile_image: (() => {
-        const incoming = (body.profileImage !== undefined) 
-          ? body.profileImage 
+        const incoming = (body.profileImage !== undefined)
+          ? body.profileImage
           : (body.profile_image !== undefined)
             ? body.profile_image
             : undefined;
-        
+
         if (incoming === undefined) return currentUser.profile_image;
         if (incoming === '' || incoming === null) return null;
-        
+
         if (incoming && incoming.includes('googleusercontent.com')) {
           console.log('[PROFILE API] REJECTING GOOGLE URL FOR profile_image:', incoming);
           return currentUser.profile_image;
         }
-        
+
         return incoming;
       })(),
     };
@@ -230,21 +230,21 @@ export async function POST(req: NextRequest) {
 
     const score = calculateProfileCompletion(updatedUser);
     let tokenIncrement = 0;
-    
+
     // Reward logic: +100 tokens if reaching 100% for the first time
     if (score === 100 && !currentUser.profile_completed_once) {
       tokenIncrement = 100;
       const finalTokensWithReward = (updatedUser.tokens ?? 0) + tokenIncrement;
-      
+
       await supabase
         .from("users")
-        .update({ 
+        .update({
           profile_completion: score,
           profile_completed_once: true,
           tokens: finalTokensWithReward
         })
         .ilike("email", email);
-        
+
       shouldShowSuccess = true;
 
       // Log Transaction if tokens added
@@ -264,8 +264,8 @@ export async function POST(req: NextRequest) {
         .ilike("email", email);
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       rewarded: tokenIncrement > 0,
       shouldShowSuccess,
       progress: score
