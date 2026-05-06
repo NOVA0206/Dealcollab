@@ -29,6 +29,7 @@ export function createBlankState(): RouterState {
     revenue: null,
     structure: null,
     intent_focus: null,
+    is_intermediary: null,
     industry_data: {},
     is_sufficient: false,
     is_complete: false,
@@ -57,9 +58,13 @@ const SECTOR_KEYWORDS: Record<SectorKey, string[]> = {
   hospitality: ['hospitality', 'hotel', 'restaurant', 'food service', 'qsr', 'cafe', 'resort', 'travel', 'tourism'],
   renewable: ['renewable', 'solar', 'wind', 'energy', 'epc', 'ipp', 'power plant', 'green energy', 'ppa', 'biomass', 'hydro'],
   defence: ['defence', 'defense', 'aerospace', 'drdl', 'drdo', 'hal', 'military', 'government tender', 'ordnance', 'security equipment'],
+  agriculture: ['agriculture', 'farming', 'agro processing', 'dairy', 'packaged food', 'fssai', 'distillery', 'ethanol', 'milling'],
+  textiles: ['textiles', 'garments', 'fabric', 'apparel', 'fashion manufacturing', 'weaving', 'knitting', 'spinning'],
+  bpo: ['bpo', 'kpo', 'outsourcing', 'staffing', 'manpower', 'it services', 'shared services', 'call center'],
+  advertising: ['advertising', 'media', 'marketing', 'agency', 'digital marketing', 'dooh', 'adtech', 'branding'],
+  ngo: ['ngo', 'trust', 'society', 'section 8', 'non-profit', '80g', '12a', 'fcra'],
   steel: ['steel', 'iron', 'tmt', 'rebar', 'foundry', 'rolling mill', 'metal', 'metallurgy'],
   automation: ['automation', 'iiot', 'robotics', 'industry 4.0', 'iot', 'sensors', 'control system'],
-  bpo: ['bpo', 'kpo', 'bpm', 'outsourcing', 'customer support', 'back office', 'shared services'],
   mixed: [],
 };
 
@@ -112,6 +117,7 @@ export function updateStateFromExtraction(
     intent: DealIntent;
     state: Partial<RouterState>;
     is_complete: boolean;
+    is_intermediary?: boolean | null;
   },
   currentMessage: string,
   preDetectedConditions?: string[]
@@ -131,6 +137,14 @@ export function updateStateFromExtraction(
   if (extraction.state.revenue) updated.revenue = extraction.state.revenue as string;
   if (extraction.state.structure) updated.structure = extraction.state.structure as string;
   if (extraction.state.intent_focus) updated.intent_focus = extraction.state.intent_focus as string;
+  
+  // Handle is_intermediary from extraction or direct field
+  if (extraction.is_intermediary !== undefined) {
+    updated.is_intermediary = extraction.is_intermediary;
+  } else if (extraction.state.is_intermediary !== undefined) {
+    updated.is_intermediary = extraction.state.is_intermediary as boolean | null;
+  }
+
   if (extraction.state.industry_data && Object.keys(extraction.state.industry_data as object).length > 0) {
     updated.industry_data = { ...current.industry_data, ...(extraction.state.industry_data as object) };
   }
@@ -216,6 +230,7 @@ const M0_OUTPUT_SCHEMA = `
 Return ONLY valid JSON. No preamble, no markdown, no fences.
 {
   "intent": "SELL_SIDE"|"BUY_SIDE"|"FUNDRAISING"|"DEBT"|"STRATEGIC_PARTNERSHIP"|null,
+  "is_intermediary": boolean|null,
   "state": {
     "sector":       string|null,
     "sub_sector":   string|null,

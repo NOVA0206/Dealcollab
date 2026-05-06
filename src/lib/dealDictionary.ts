@@ -31,10 +31,22 @@ export const SECTOR_SYNONYMS: Record<string, SectorKey> = {
     'MIDC': 'manufacturing',
     'auto ancillary': 'manufacturing',
     'GIDC': 'manufacturing',
-    'TMT rebar': 'steel',        // new sector
-    'IIoT': 'automation',   // new sector
-    'BPO': 'bpo',          // new sector
-    // ... all entries
+    'TMT rebar': 'steel',
+    'IIoT': 'automation',
+    'BPO': 'bpo',
+    'KPO': 'bpo',
+    'dairy': 'agriculture',
+    'agro': 'agriculture',
+    'farming': 'agriculture',
+    'textile': 'textiles',
+    'garment': 'textiles',
+    'apparel': 'textiles',
+    'media': 'advertising',
+    'marketing': 'advertising',
+    'branding': 'advertising',
+    'ngo': 'ngo',
+    'trust': 'ngo',
+    'society': 'ngo',
 };
 
 export const SHORTHAND_MAP: Record<string, string> = {

@@ -23,6 +23,7 @@ export interface ConversationState {
 
 export interface IntelligenceState {
   intent: "SELL_SIDE" | "BUY_SIDE" | "FUNDRAISING" | "DEBT" | "STRATEGIC_PARTNERSHIP" | null;
+  is_intermediary: boolean | null;
   state: ConversationState;
   is_complete: boolean;
   message: string;

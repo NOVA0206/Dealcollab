@@ -12,8 +12,8 @@ export type DealIntent =
   | null;
 
 export type SectorKey =
-  | 'pharma'
   | 'manufacturing'
+  | 'pharma'
   | 'saas'
   | 'finserv'
   | 'consumer'
@@ -24,10 +24,14 @@ export type SectorKey =
   | 'hospitality'
   | 'renewable'
   | 'defence'
-  | 'steel'
-  | 'automation'
+  | 'agriculture'
+  | 'textiles'
   | 'bpo'
-  | 'mixed';
+  | 'advertising'
+  | 'ngo'
+  | 'mixed'
+  | 'steel' // Keeping these for backward compatibility if needed, though M4 absorbs them
+  | 'automation';
 
 export type ConversationPhase =
   | 'ENTRY'
@@ -46,6 +50,7 @@ export interface RouterState {
   revenue: string | null;
   structure: string | null;
   intent_focus: string | null;
+  is_intermediary: boolean | null; // Added per M3 requirement
   industry_data: Record<string, unknown>;
   is_sufficient: boolean;
   is_complete: boolean;
