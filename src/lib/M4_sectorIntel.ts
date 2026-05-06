@@ -45,6 +45,7 @@
  */
 
 import { SectorKey } from './types';
+export type { SectorKey };
 
 // ─────────────────────────────────────────────────────────────
 // A. MANUFACTURING / INDUSTRIAL

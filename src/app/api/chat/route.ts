@@ -2,11 +2,13 @@ import { auth } from '@/auth';
 import { db } from '@/db';
 import { chatSessions } from '@/db/schema';
 import { processIntelligence } from '@/lib/intelligenceEngine';
-import { extractSpecialConditions, normalizeMessage } from '@/lib/normalizeMessage';
+import { normalizeMessage } from '@/lib/normalizeMessage';
 import {
   buildSystemPrompt,
   createBlankState,
   updateStateFromExtraction,
+  detectIntentFromText,
+  detectSectorFromText,
   type DealIntent,
   type RouterState
 } from '@/lib/promptRouter';
@@ -79,7 +81,7 @@ export async function POST(req: NextRequest) {
 
     // 🔥 Pre-processing layer (BEFORE LLM)
     const normalizedMessage = normalizeMessage(rawMessage);
-    const detectedConditions = extractSpecialConditions(rawMessage); // IMPORTANT: raw message
+    // const detectedConditions = extractSpecialConditions(rawMessage); // Removed as it's now handled inside promptRouter.ts
 
     // 🔥 NEW: Normalize message (fix typos, expand shorthands, translate Hinglish)
     const message = normalizedMessage;
@@ -149,7 +151,10 @@ export async function POST(req: NextRequest) {
 
       if (seededSession) {
         activeChatId = seededSession.id;
-        storedState = (seededSession.state as unknown as RouterState) || createBlankState();
+        storedState = {
+          ...createBlankState(),
+          ...(seededSession.state as unknown as Partial<RouterState> || {})
+        };
         console.log(`[STATE] Recovered seeded session: ${activeChatId} | Phase: ${storedState.phase}`);
       }
     }
@@ -167,29 +172,15 @@ export async function POST(req: NextRequest) {
         console.log("[STATE] Provided chatId not found, checking for last active session...");
         activeChatId = null;
       } else {
-        storedState = (existingSession.state as unknown as RouterState) || createBlankState();
+        storedState = {
+          ...createBlankState(),
+          ...(existingSession.state as unknown as Partial<RouterState> || {})
+        };
         console.log(`[STATE] Loaded state for phase: ${storedState.phase} | turn: ${storedState.turn_count}`);
       }
     }
 
-    // 🔥 FINAL FALLBACK: If no chatId or documentId, try to find the absolute most recent session for this user
-    // This prevents generic "Welcome" if the user simply refreshes without a clean URL state
-    if (!activeChatId) {
-      console.log(`[STATE] No session found, attempting last active recovery for user: ${userId}`);
-      const { data: lastSession } = await supabase
-        .from("chat_sessions")
-        .select("id, state")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
 
-      if (lastSession) {
-        activeChatId = lastSession.id;
-        storedState = (lastSession.state as unknown as RouterState) || createBlankState();
-        console.log(`[STATE] Recovered last active session: ${activeChatId} | Phase: ${storedState.phase}`);
-      }
-    }
 
     // If still no active session, create one
     if (!activeChatId) {
@@ -299,7 +290,32 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. AI PROCESSING & INTELLIGENCE
-    const { systemPrompt, modulesLoaded, tokenEstimate } = buildSystemPrompt(storedState, matchedMandatesStr);
+    // PRE-DETECTION: Detect intent and sector from current message before building prompt.
+    // This ensures M3 and M4 load on turn 1 even though storedState is still blank.
+    // storedState itself is NOT modified here — only candidateState is used for prompt building.
+    const candidateState: RouterState = { ...storedState };
+
+    if (!candidateState.intent) {
+      const detectedIntent = detectIntentFromText(message);
+      if (detectedIntent) {
+        candidateState.intent = detectedIntent;
+        console.log(`[PRE-DETECT] Intent detected from message: ${detectedIntent}`);
+      }
+    }
+
+    if (!candidateState.sector) {
+      const detectedSector = detectSectorFromText(message);
+      if (detectedSector) {
+        candidateState.sector = detectedSector;
+        console.log(`[PRE-DETECT] Sector detected from message: ${detectedSector}`);
+      }
+    }
+
+    // Use candidateState for prompt building — not storedState
+    const { systemPrompt, modulesLoaded, tokenEstimate } = buildSystemPrompt(
+      candidateState,
+      matchedMandatesStr
+    );
     console.log(`[ROUTER] Modules: ${modulesLoaded.join(', ')} | ~${tokenEstimate} tokens`);
 
     const extraction = await processIntelligence(
@@ -317,8 +333,7 @@ export async function POST(req: NextRequest) {
     const updatedState = updateStateFromExtraction(
       storedState,
       extraction as unknown as { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
-      message,
-      detectedConditions
+      message
     );
 
     // 🛡️ PHASE LOCK: If we were in MOMENTUM, stay in MOMENTUM (unless complete)
