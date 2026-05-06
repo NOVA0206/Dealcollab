@@ -2,10 +2,19 @@ import { auth } from '@/auth';
 import { db } from '@/db';
 import { chatSessions } from '@/db/schema';
 import { processIntelligence } from '@/lib/intelligenceEngine';
+import { extractSpecialConditions, normalizeMessage } from '@/lib/normalizeMessage';
+import {
+  buildSystemPrompt,
+  createBlankState,
+  updateStateFromExtraction,
+  type DealIntent,
+  type RouterState
+} from '@/lib/promptRouter';
 import { buildFinalMessage } from '@/lib/responseBuilder';
 import { createServerSupabaseClient } from '@/utils/supabase/server';
 import { desc, eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
+
 
 /**
  * 🎯 HARDENED PRODUCTION CHAT SYSTEM (v4.0)
@@ -15,145 +24,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = "nodejs";
 export const dynamic = 'force-dynamic';
 
-const getSystemPrompt = (matchedMandates: string = "No direct mandates found in database yet.") => `
-You are the DealCollab Matchmaking Engine.
+// getSystemPrompt removed in favor of modular promptRouter.ts
 
-You MUST strictly follow the Antigravity Prompt logic (V3.1).
-DO NOT modify, override, or ignore any rule.
-
----
-
-# 🔒 CORE ROLE
-You are:
-✔ A deal intelligence layer
-✔ A qualification engine
-✔ A matchmaking optimizer
-
-You are NOT:
-✘ A generic chatbot
-✘ A questionnaire system
-✘ A repetitive assistant
-
----
-
-# 🧠 CORE PHILOSOPHY: MOMENTUM OVER COMPLETENESS
-Do NOT aim to collect all information upfront.
-Capture sufficient intelligence → initiate → refine progressively.
-You are optimizing for speed of progression and match relevance.
-
----
-
-# ⚠️ DOCUMENT PRIORITY RULE (CRITICAL)
-If document or detailed input is provided:
-* Extract ALL available deal intelligence first.
-* NEVER ask what is already provided or repeat extracted fields.
-* NEVER assume missing fields if present implicitly.
-
----
-
-# 🔥 EXECUTION ENGINE (STRICT FLOW)
-
-### STEP 1 — Identify Intent
-BUY / SELL / FUNDRAISE / STRATEGIC
-
-### STEP 2 — Identify Sector
-Always aim for specific sub-sector. If too broad → ask only 1 clarification question.
-
-### STEP 2A — INDUSTRY SIGNAL VALIDATION (MANDATORY)
-You MUST capture at least ONE: sub-sector, business model, capability intent, or product specialization.
-If missing → ask minimum required question (1 max).
-
-### STEP 3 — Extract Core Fields
-Geography, budget/revenue/size, and deal structure.
-
-### STEP 4 — Industry Intelligence Layer
-Ask 2–4 high-value questions ONLY IF needed to improve match quality. Avoid generic questioning.
----
-
-# 🚨 STEP 5 — SUFFICIENCY CHECK (CRITICAL)
-Proceed to Matchmaking Mode when:
-✔ Industry signal present (MANDATORY)
-AND
-✔ ANY 2 of: Budget/revenue, Deal type, Geography.
-
-### If NOT sufficient:
-→ Ask ONLY missing critical inputs (1–2 max). Do NOT restart full questioning.
-
----
-
-# 🚀 STEP 6 — MODE SWITCH → MATCHMAKING MODE
-Once sufficiency is reached:
-❌ STOP: structured blocks, bullet lists, multiple questions.
-✅ START: conversational flow, progress-driven interaction.
-
----
-
-# ⚡ MATCHMAKING MODE (RESPONSE LOGIC)
-Follow this flow:
-1. Acknowledge: "Got it — [clean summary of inputs]"
-2. Show Progress: "This is sufficient to begin identifying relevant opportunities."
-3. Indicate Action: "I’ll start mapping suitable counterparties."
-4. Optional Refinement: "One quick refinement: [single high-value question]"
-
-Rules: Max 1 question at a time. No forcing completion.
-
----
-
-# 🛑 STOP CONDITION
-
-Stop asking further questions when:
-
-* 2 refinements are completed (MAX)
-* OR sufficient clarity achieved
-* OR user shows low engagement / friction
-
-NEVER continue refinement beyond this.
-
----
-
-# ✅ MANDATE CLOSURE
-When sufficient clarity is achieved:
-"Your requirement has been structured successfully.
-Your intent is secure and confidential with us.
-This is not deal distribution — this is deal resolution.
-I will identify relevant counterparties, validate their intent, and only connect you once alignment is confirmed."
-
----
-
-# 🚫 FORBIDDEN BEHAVIOR
-❌ Repeat full question structures.
-❌ Ask multiple questions repeatedly.
-❌ Sound like a form or checklist.
-❌ Proceed without industry signal.
----
-
-# 🧠 EXTRACTION SCHEMA (CRITICAL)
-Return JSON ONLY:
-
-{
-  "intent": "SELL_SIDE" | "BUY_SIDE" | "FUNDRAISING" | "DEBT" | "STRATEGIC_PARTNERSHIP" | null,
-  "state": {
-    "sector": "extracted sector or null",
-    "sub_sector": "extracted sub-sector or null",
-    "geography": "extracted geography or null",
-    "deal_size": "extracted deal size or null",
-    "revenue": "extracted revenue or null",
-    "structure": "extracted deal structure or null",
-    "intent_focus": "extracted focus or null",
-    "industry_data": {}
-  },
-  "is_complete": false,
-  "message": "WRITE YOUR ACTUAL RESPONSE HERE. Follow the Matchmaking Mode format above."
-}
-
----
-
-# 📄 INTERNAL MATCH DATA
-Relevant active mandates from database:
-${matchedMandates}
-
-Prioritize these matches. Explain WHY they are relevant.
-`;
 
 
 export async function GET() {
@@ -203,7 +75,15 @@ export async function POST(req: NextRequest) {
     if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const message = body.message || "";
+    const rawMessage = body.message || "";
+
+    // 🔥 Pre-processing layer (BEFORE LLM)
+    const normalizedMessage = normalizeMessage(rawMessage);
+    const detectedConditions = extractSpecialConditions(rawMessage); // IMPORTANT: raw message
+
+    // 🔥 NEW: Normalize message (fix typos, expand shorthands, translate Hinglish)
+    const message = normalizedMessage;
+
     let documentText = body.document || body.documentText || "";
     const documentUrl = body.documentUrl || "";
     const documentId = body.documentId;
@@ -265,83 +145,82 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Verify session exists if chatId is provided
+    // 2. SESSION & STATE LOADING
+    let storedState: RouterState = createBlankState();
+
+    // Consistency Guard: If chatId is missing but documentId is present, try to find the seeded session
+    if (!activeChatId && documentId) {
+      const { data: seededSession } = await supabase
+        .from("chat_sessions")
+        .select("id, state")
+        .eq("document_id", documentId)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (seededSession) {
+        activeChatId = seededSession.id;
+        storedState = (seededSession.state as unknown as RouterState) || createBlankState();
+        console.log(`[STATE] Recovered seeded session: ${activeChatId} | Phase: ${storedState.phase}`);
+      }
+    }
+
+    // Standard session loading if chatId exists
     if (activeChatId) {
       const { data: existingSession } = await supabase
         .from("chat_sessions")
-        .select("id, document_id")
+        .select("id, document_id, state")
         .eq("id", activeChatId)
         .single();
 
       if (!existingSession) {
-        console.log("Provided chatId not found, resetting to null");
+        console.log("[STATE] Provided chatId not found, resetting");
         activeChatId = null;
+      } else {
+        storedState = (existingSession.state as unknown as RouterState) || createBlankState();
       }
     }
 
-    // If no active session, create one
+    // If still no active session, create one
     if (!activeChatId) {
-      console.log("Creating new chat session for user:", userId);
+      console.log("[STATE] Creating fresh session for user:", userId);
       const { data: newSession, error: sessionErr } = await supabase
         .from("chat_sessions")
         .insert([{
           user_id: userId,
           document_id: documentId || null,
-          title: message.slice(0, 30) + (message.length > 30 ? "..." : "")
+          title: message.slice(0, 30) + (message.length > 30 ? "..." : ""),
+          state: storedState
         }])
         .select()
         .single();
 
-      if (sessionErr) {
-        console.error("Supabase session error:", sessionErr);
-        throw new Error(sessionErr.message);
-      }
+      if (sessionErr) throw new Error(sessionErr.message);
       activeChatId = newSession.id;
-    } else if (documentId) {
-      // Link document if not already linked
-      await supabase
-        .from("chat_sessions")
-        .update({ document_id: documentId })
-        .eq("id", activeChatId)
-        .is("document_id", null);
     }
 
-    console.log("Using activeChatId:", activeChatId);
+    // 3. PERSIST USER MESSAGE
+    await supabase.from("chat_messages").insert([{
+      chat_id: activeChatId,
+      role: 'user',
+      content: message,
+    }]);
 
-    const { error: msgErr } = await supabase
-      .from("chat_messages")
-      .insert([{
-        chat_id: activeChatId,
-        role: 'user',
-        content: message,
-      }]);
-
-    if (msgErr) {
-      console.error("Supabase message error:", msgErr);
-      throw new Error(msgErr.message);
-    }
-
-    // 3. FETCH FULL HISTORY (Use Supabase for consistency with the insert above)
-    const { data: history, error: historyErr } = await supabase
+    // 4. FETCH HISTORY
+    const { data: history } = await supabase
       .from("chat_messages")
       .select("*")
       .eq("chat_id", activeChatId)
       .order("created_at", { ascending: true });
 
-    if (historyErr || !history) {
-      console.error("Supabase history error:", historyErr);
-      throw new Error(historyErr?.message || "Failed to fetch history");
-    }
-
-    const formattedHistory = history.map(h => {
+    const formattedHistory = (history || []).map(h => {
       let content = h.content;
       if (h.role === 'assistant') {
         try {
           const parsed = JSON.parse(h.content);
           content = parsed.message || h.content;
-        } catch {
-          // Fallback if not JSON
-        }
+        } catch { }
       }
       return {
         role: h.role as "user" | "assistant" | "system",
@@ -349,52 +228,63 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    // 🔥 4. MATCHMAKING ENGINE: Fetch relevant mandates
-    const { reconstructState } = await import('@/lib/intelligenceEngine');
+    // 🔥 5. MATCHMAKING ENGINE (Isolate DB failures from AI flow)
     const { mandates } = await import('@/db/schema');
-    const { and, eq, not, arrayOverlaps, or } = await import('drizzle-orm');
+    const { and, eq, not, arrayOverlaps } = await import('drizzle-orm');
 
-    const currentState = await reconstructState(formattedHistory);
     let matchedMandatesStr = "No active mandates found in database yet.";
 
-    if (currentState.sector || currentState.intent_focus) {
-      console.log(`[MATCHMAKING] Searching matches for Sector: ${currentState.sector} | Intent: ${currentState.intent_focus}`);
+    if (storedState.sector || storedState.intent) {
+      try {
+        console.log(`[MATCHMAKING] Querying for Sector: ${storedState.sector} | Intent: ${storedState.intent}`);
 
-      // Opposite intent logic
-      const targetIntent = currentState.intent_focus === 'SELL_SIDE' ? 'BUY_SIDE' :
-        currentState.intent_focus === 'BUY_SIDE' ? 'SELL_SIDE' : null;
+        const targetIntent = storedState.intent === 'SELL_SIDE' ? 'BUY_SIDE' :
+          storedState.intent === 'BUY_SIDE' ? 'SELL_SIDE' : null;
 
-      const results = await db.query.mandates.findMany({
-        where: and(
-          eq(mandates.status, 'ACTIVE'),
-          not(eq(mandates.userId, userId)),
-          targetIntent ? eq(mandates.intent, targetIntent) : undefined,
-          currentState.sector ? arrayOverlaps(mandates.sectors, [currentState.sector]) : undefined
-        ),
-        limit: 3
-      });
+        const results = await db.query.mandates.findMany({
+          where: and(
+            eq(mandates.status, 'ACTIVE'),
+            not(eq(mandates.userId, userId)),
+            targetIntent ? eq(mandates.intent, targetIntent) : undefined,
+            storedState.sector ? arrayOverlaps(mandates.sectors, [storedState.sector]) : undefined
+          ),
+          limit: 3
+        });
 
-      if (results.length > 0) {
-        matchedMandatesStr = results.map(r =>
-          `- [${r.intent}] ${r.sectors?.join(", ")} | Size: ${r.dealSizeMinCr}-${r.dealSizeMaxCr} Cr | Geography: ${r.geographies?.join(", ")}`
-        ).join("\n");
-        console.log(`[MATCHMAKING] Found ${results.length} matches.`);
+        if (results && results.length > 0) {
+          matchedMandatesStr = results.map(r =>
+            `- [${r.intent}] ${r.sectors?.join(", ")} | Size: ${r.dealSizeMinCr}-${r.dealSizeMaxCr} Cr | Geography: ${r.geographies?.join(", ")}`
+          ).join("\n");
+          console.log(`[MATCHMAKING] Found ${results.length} matches.`);
+        }
+      } catch (matchErr) {
+        console.error("❌ MATCHMAKING FAILED (Isolating):", matchErr);
+        // We continue with matchedMandatesStr as default to avoid 500
       }
     }
 
     // 5. AI PROCESSING & INTELLIGENCE
-    const dynamicSystemPrompt = getSystemPrompt(matchedMandatesStr);
+    const { systemPrompt, modulesLoaded, tokenEstimate } = buildSystemPrompt(storedState, matchedMandatesStr);
+    console.log(`[ROUTER] Modules: ${modulesLoaded.join(', ')} | ~${tokenEstimate} tokens`);
+
     const extraction = await processIntelligence(
       message,
       formattedHistory,
       documentText,
-      dynamicSystemPrompt
+      systemPrompt
     );
 
     const aiContent = JSON.stringify(extraction);
     console.log("🧠 FINAL DATA:", aiContent);
 
-    // 6. PERSIST ASSISTANT RESPONSE (FULL JSON FOR MEMORY)
+    // 6. UPDATE STATE & PERSIST ASSISTANT RESPONSE
+    const updatedState = updateStateFromExtraction(
+      storedState,
+      extraction as unknown as { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
+      message,
+      detectedConditions
+    );
+
     const { error: assistantMsgErr } = await supabase
       .from("chat_messages")
       .insert([{
@@ -407,6 +297,12 @@ export async function POST(req: NextRequest) {
       console.error("Supabase error:", assistantMsgErr);
       throw new Error(assistantMsgErr.message);
     }
+
+    // Persist updated state to session
+    await supabase
+      .from('chat_sessions')
+      .update({ state: updatedState })
+      .eq('id', activeChatId);
 
     // 7. DEAL EXTRACTION LOGIC & PERSISTENCE
     const s = extraction.state;
@@ -484,6 +380,12 @@ export async function POST(req: NextRequest) {
     }
 
     const finalMessage = buildFinalMessage(extraction);
+
+    // 🔬 DEBUG STRATEGY: Log critical pipeline steps
+    console.log(`[DEBUG] RouterState Phase: ${storedState.phase} | is_sufficient: ${storedState.is_sufficient}`);
+    console.log(`[DEBUG] System Prompt Length: ${systemPrompt.length} chars`);
+    console.log(`[DEBUG] AI Output Valid JSON: ${!!extraction}`);
+    console.log(`[DEBUG] Final Message: ${finalMessage.slice(0, 50)}...`);
 
     return Response.json({
       success: true,

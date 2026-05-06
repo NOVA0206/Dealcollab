@@ -159,15 +159,20 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 6. AUTO-CREATE CHAT SESSION (Only if document was saved)
+    // 6. AUTO-CREATE CHAT SESSION (Seeded with document intelligence)
     let chatData: { id: string } | null = null;
     if (docData?.id) {
+      // Seed initial state from structured data
+      const { initializeStateFromDocument } = await import('@/lib/promptRouter');
+      const initialState = initializeStateFromDocument((structuredData as unknown as Record<string, unknown>) || {});
+
       const { data, error: chatErr } = await supabase
         .from('chat_sessions')
         .insert({
           user_id: userId,
           document_id: docData.id,
-          title: `Deal Intake: ${file.name}`
+          title: `Deal Intake: ${file.name}`,
+          state: initialState
         })
         .select('id')
         .single();

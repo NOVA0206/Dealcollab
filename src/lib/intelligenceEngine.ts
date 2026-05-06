@@ -1,5 +1,4 @@
-import { IntelligenceState, INITIAL_STATE, ConversationState } from "./conversationState";
-import { generateControlPrompt, mergeWithPriority } from "./controlLayer";
+import { IntelligenceState } from "./conversationState";
 import Groq from "groq-sdk";
 import OpenAI from "openai";
 
@@ -22,30 +21,7 @@ function getGroq() {
   return new Groq({ apiKey: process.env.GROQ_API_KEY });
 }
 
-export async function reconstructState(history: ChatMessage[]): Promise<IntelligenceState["state"]> {
-  let conversationData: ConversationState = { ...INITIAL_STATE };
 
-  // Scan backwards for the latest state - Optimized
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].role === 'assistant') {
-      try {
-        const content = history[i].content;
-        if (content.startsWith('{')) { // Quick JSON check
-          const parsed = JSON.parse(content);
-          if (parsed.state || parsed.intent) {
-            conversationData = {
-              ...conversationData,
-              intent_focus: parsed.intent || conversationData.intent_focus,
-              ...(parsed.state || {})
-            };
-            break;
-          }
-        }
-      } catch { continue; }
-    }
-  }
-  return conversationData;
-}
 
 /**
  * 🛠️ AI WRAPPER: Handles OpenAI call with Groq fallback.
@@ -76,25 +52,7 @@ async function callAI(messages: ChatMessage[], maxTokens: number = 700): Promise
   }
 }
 
-/**
- * 🛠️ PRE-PROCESSOR: Extracts raw data from text/document before main logic.
- */
-async function extractFromInput(input: string): Promise<Partial<ConversationState>> {
-  try {
-    const content = await callAI([
-      { 
-        role: "system", 
-        content: `Extract deal metadata into JSON. 
-        Fields: sector, geography, valuation, revenue, structure, offerings, clients, risks, strategic_objective, intent_focus (BUY_SIDE/SELL_SIDE/FUNDRAISING). 
-        Be specific. Return JSON ONLY.` 
-      },
-      { role: "user", content: input.slice(0, 10000) }
-    ], 300);
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
-}
+
 
 export async function processIntelligence(
   message: string, 
@@ -103,112 +61,31 @@ export async function processIntelligence(
   systemPrompt?: string
 ): Promise<IntelligenceState> {
   const hasDocument = !!(documentText && documentText.trim().length > 50);
-
-  // Reconstruct conversation state from history
-  const conversationData = await reconstructState(history);
-
-  // Build system prompt — keep it clean, no document injected here
-  const finalSystemPrompt = systemPrompt || "";
+  const finalSystemPrompt = systemPrompt || "You are a helpful deal intelligence assistant.";
 
   let userContent = "";
 
   if (hasDocument) {
-    const docText = documentText!.trim().slice(0, 6000); // OpenAI handles more context
-
-    // Determine what the user is asking alongside the document
+    const docText = documentText!.trim().slice(0, 8000); 
     const userQuestion = message.trim();
-    const isGenericInstruction = 
-      !userQuestion || 
-      userQuestion.toLowerCase().includes("extract and analyse") || 
-      userQuestion.toLowerCase().includes("summary of") ||
-      userQuestion.toLowerCase().includes("analyse this document");
-
-    if (isGenericInstruction) {
-      userContent = `I have uploaded a deal document. You are an expert M&A assistant.
-
-DOCUMENT CONTENT:
+    
+    userContent = `[CONTEXT: DOCUMENT UPLOADED]
 ---
 ${docText}
 ---
 
-STRICT RULES:
-1. ACKNOWLEDGE FACTS: Internally identify all facts in the document first.
-2. NO REPETITION: You MUST NOT ask any question whose answer is already present.
-3. ALLOWED ACTIONS: You are ONLY allowed to deepen, clarify, expand, or position strategically.
-4. CITE AND ASK: Always reference a document fact before asking a related question.
-
-PROCESS:
-Step 1: Identify what is already known from the document.
-Step 2: Identify gaps or areas needing deeper insight.
-Step 3: Ask ONLY high-value follow-up questions.
-
-OUTPUT FORMAT:
-
-### Strategic Questions
-- [Document Fact] — [Follow-up Question]
-- [Document Fact] — [Follow-up Question]
-...
-
-EXAMPLE:
-❌ "What products does the company offer?"
-✅ "The company offers AC/DC chargers and software — which segment drives the highest revenue?"
-
-If your output looks like a generic questionnaire, it is WRONG.`;
-    } else {
-      // User typed a specific question alongside the document
-      userContent = `Document uploaded:
----
-${docText}
----
-
-User question: ${userQuestion}
-
-Answer the user's question using the document content. Then, generate 3-4 "Strategic Questions" following the citation format: "[Document Fact] — [Follow-up Question]".
-
-STRICT RULES: 
-1. Do NOT ask for information already explicitly present in the document.
-2. If the output looks like a generic questionnaire, it is INVALID.`;
-    }
+User Input: ${userQuestion || "Please extract all relevant deal data from this document and structure it according to your instructions."}`;
   } else {
-    // No document — normal text conversation
-    if (message.trim().length > 0) {
-      const userMsgData = await extractFromInput(message);
-      const merged = mergeWithPriority(conversationData, userMsgData, 'user');
-      Object.assign(conversationData, merged);
-    }
-    const controlPrompt = generateControlPrompt(conversationData);
     userContent = message;
-
-    const aiMessages = [
-      {
-        role: "system" as const,
-        content: controlPrompt + "\n\n" + finalSystemPrompt + 
-          `\n\nCURRENT STATE: ${JSON.stringify(conversationData)}`
-      },
-      ...history.slice(-6).map(h => ({
-        role: h.role as "user" | "assistant" | "system",
-        content: h.content
-      })),
-      { role: "user" as const, content: userContent }
-    ];
-
-    try {
-      const content = await callAI(aiMessages, 600);
-      if (content) return JSON.parse(content);
-    } catch (err) {
-      console.error("[INTELLIGENCE] AI failed:", err);
-      throw new Error(`AI failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
   }
 
-  // Document path — single AI call with document in user message
   const aiMessages = [
     {
       role: "system" as const,
       content: finalSystemPrompt
     },
-    // Include last 4 turns of history for context
-    ...history.slice(-4).map(h => ({
+    // Context: limited history for relevance
+    ...history.slice(-8).map(h => ({
       role: h.role as "user" | "assistant" | "system",
       content: h.role === "assistant" 
         ? (() => {
@@ -223,10 +100,17 @@ STRICT RULES:
   ];
 
   try {
-    console.log(`[INTELLIGENCE] Has document: ${hasDocument} | Doc length: ${documentText?.length || 0}`);
-    const content = await callAI(aiMessages, 700);
-    console.log(`[INTELLIGENCE] Raw response: ${content.slice(0, 200)}`);
-    if (content) return JSON.parse(content);
+    console.log(`[INTELLIGENCE] Processing. Document: ${hasDocument} | History: ${history.length} turns`);
+    const content = await callAI(aiMessages, 800);
+    
+    if (content) {
+      try {
+        return JSON.parse(content);
+      } catch {
+        console.error("[INTELLIGENCE] JSON Parse Error. Raw content:", content);
+        throw new Error("AI returned invalid JSON structure.");
+      }
+    }
   } catch (err) {
     console.error(`[INTELLIGENCE] AI call failed:`, err);
     throw new Error(`AI processing failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -270,6 +154,8 @@ Return ONLY a JSON object with this exact structure:
   "industry": "...",
   "location": "...",
   "transaction_type": "...",
+  "deal_size": "...",
+  "revenue": "...",
   "products_services": ["...", "..."],
   "capabilities": ["...", "..."],
   "market_position": "...",
