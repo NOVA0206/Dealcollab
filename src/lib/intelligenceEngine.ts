@@ -126,6 +126,8 @@ export interface DocumentIntelligence {
   industry: string;
   location: string;
   transaction_type: string;
+  deal_size?: string;
+  revenue?: string;
   products_services: string[];
   capabilities: string[];
   market_position: string;

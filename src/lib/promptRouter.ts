@@ -130,8 +130,19 @@ const SECTOR_KEYWORDS: Record<SectorKey, string[]> = {
     'polymer', 'adhesive', 'coating', 'fine chemical'],
   hospitality: ['hospitality', 'hotel', 'restaurant', 'food service', 'qsr', 'cafe',
     'resort', 'travel', 'tourism'],
-  renewable: ['renewable', 'solar', 'wind', 'energy', 'epc', 'ipp', 'power plant',
-    'green energy', 'ppa', 'biomass', 'hydro'],
+  renewable: [
+    'renewable', 'solar', 'wind', 'energy', 'epc', 'ipp', 'power plant',
+    'green energy', 'ppa', 'biomass', 'hydro',
+    // solar project signals
+    'spv', 'solar spv', 'mw', 'mwp', 'mwdc', 'mwac', 'solar project',
+    'solar plant', 'solar farm', 'solar asset', 'open access', 'c&i solar',
+    'rooftop solar', 'ground mounted', 'captive power', 'wheeling',
+    'stu', 'stu connectivity', 'grid connectivity', 'solar potential',
+    // wind / hybrid
+    'wind farm', 'wind project', 'hybrid project', 're asset',
+    // transaction signals specific to energy
+    'spv acquisition', 'acquire spv', 'energy asset', 'power asset',
+  ],
   defence: ['defence', 'defense', 'aerospace', 'drdl', 'drdo', 'hal', 'military',
     'government tender', 'ordnance', 'security equipment',
     'defence manufactur', 'defense manufactur',
@@ -141,8 +152,23 @@ const SECTOR_KEYWORDS: Record<SectorKey, string[]> = {
 };
 
 const INTENT_KEYWORDS: Record<Exclude<DealIntent, null>, string[]> = {
-  SELL_SIDE: ['sell', 'exit', 'divest', 'divestiture', 'find buyer', 'stake sale',
-    'looking for buyer', 'want to sell', 'selling', 'full sale'],
+  SELL_SIDE: [
+    'sell', 'exit', 'divest', 'divestiture', 'find buyer', 'stake sale',
+    'looking for buyer', 'want to sell', 'selling', 'full sale',
+    'sell my business', 'sell my company', 'sell our business', 'sell our company',
+    'business for sale', 'company for sale', 'want an exit', 'looking for an exit',
+    'exit strategy', 'exit opportunity', 'promoter exit', 'partial exit',
+    'strategic sale', 'trade sale', 'secondary sale', 'sell a stake',
+    'offload', 'divesting', 'find an acquirer', 'find acquirer',
+    // structured pitch / teaser language
+    'available for acquisition', 'available for sale', 'spv for sale', 'asset for sale',
+    'acquisition opportunity', 'investment opportunity', 'transaction ready',
+    'transaction-ready', 'ready to transact', 'seeking acquirer', 'seeking buyer',
+    'open to acquisition', 'open to sale', 'inviting offers', 'inviting bids',
+    'rtb', 'ready to buy', 'ready to sell',
+    // document / pitch deck signals
+    'teaser', 'im available', 'information memorandum', 'mandate shared',
+  ],
   BUY_SIDE: ['buy', 'acquire', 'acquisition', 'looking to buy', 'find target',
     'roll-up', 'platform acquisition', 'want to acquire', 'purchasing'],
   FUNDRAISING: ['raise', 'fundraise', 'funding', 'investor', 'equity', 'pe fund',
@@ -176,10 +202,19 @@ export function detectSectorFromText(text: string): SectorKey | null {
 
 export function detectIntentFromText(text: string): DealIntent {
   const lower = text.toLowerCase();
+  let bestIntent: DealIntent = null;
+  let bestScore = 0;
+
   for (const [intent, keywords] of Object.entries(INTENT_KEYWORDS) as [Exclude<DealIntent, null>, string[]][]) {
-    if (keywords.some(kw => lower.includes(kw))) return intent;
+    const score = keywords.filter(kw => lower.includes(kw)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIntent = intent as DealIntent;
+    }
   }
-  return null;
+
+  if (bestIntent) console.log(`[DETECTOR] Intent scored: ${bestIntent} (score: ${bestScore})`);
+  return bestIntent;
 }
 
 export function detectProfileIntentFromText(text: string): boolean {
@@ -246,8 +281,15 @@ export function updateStateFromExtraction(
   }
 
   const hasIndustrySignal = !!(updated.sector || updated.sub_sector);
+
+  // Renewable/realestate deals use capacity/acreage as size proxy — revenue may never be stated
+  const capacitySectors: (SectorKey | null)[] = ['renewable', 'realestate'];
+  const hasCapacitySignal = capacitySectors.includes(updated.sector)
+    ? !!(updated.deal_size || updated.industry_data?.capacity || updated.industry_data?.installed_capacity || updated.sub_sector)
+    : !!(updated.revenue || updated.deal_size);
+
   const qualifyingFields = [
-    !!(updated.revenue || updated.deal_size),
+    hasCapacitySignal,
     !!(updated.structure || updated.intent),
     !!(updated.geography),
   ].filter(Boolean).length;
@@ -352,11 +394,58 @@ Return ONLY valid JSON. No preamble, no markdown, no fences.
   "message": "YOUR FULL RESPONSE TEXT HERE"
 }
 
-STEP 1 — EXTRACT BEFORE WRITING:
-  Fill state fields from everything the user has provided. NEVER ask for a field already given.
-  BUY_SIDE sub-type rule: if user specified target type (e.g., "hospital"), do NOT ask type again.
-  Ask the sub-type instead (e.g., "multispecialty, specialty, or standalone?").
-  Store the sub-type answer in sub_sector field.
+STEP 1 — EXTRACT BEFORE WRITING (MANDATORY — do this before generating a single word of response):
+ 
+  A. INTENT DETECTION — read the FULL message for sell/buy signals:
+     Sell signals: "available for acquisition", "acquisition opportunity", "for sale", "RTB",
+       "transaction ready", "seeking buyer", "inviting offers", any pitch/teaser language → SELL_SIDE
+     Buy signals: "want to buy", "looking to acquire", "budget is X" with target described → BUY_SIDE
+     If both signals present → score by count. More sell signals = SELL_SIDE.
+ 
+  B. SECTOR DETECTION — read the FULL message for sector signals:
+     solar/wind/MW/MWp/SPV/PPA/IPP/open access/C&I → renewable
+     hospital/clinic/pharma/NABH/diagnostic → pharma
+     digital marketing/SEO/SaaS/platform/ARR → saas
+     manufacturing/plant/factory/OEM → manufacturing
+     (apply same logic for all sectors — use full message, not just first line)
+ 
+  C. FIELD EXTRACTION — extract every field present anywhere in the message:
+     - sector:     any business/asset type mentioned
+     - geography:  any city, state, region, or location mentioned
+     - deal_size:  any budget, ticket size, revenue, capacity, or acreage mentioned
+                   For renewable: MW/MWp/MWdc values ARE the deal_size — store them.
+                   For realestate: acres/sq ft/plot size ARE the deal_size — store them.
+                   Never ask for revenue on renewable or realestate if capacity/size is state
+     - structure:  any transaction structure mentioned (full sale, SPV sale, stake sale)
+     - sub_sector: any specific sub-type (multispecialty hospital, C&I solar, digital agency)
+ 
+  D. SKIP RULES — after extraction, apply before writing questions:
+     ✘ Do NOT ask for sector if detected in step B
+     ✘ Do NOT ask for geography if any location found in step C
+     ✘ Do NOT ask for deal_size if any figure (Cr, MW, USD, %) found in step C
+     ✘ Do NOT ask for structure if transaction type stated
+     ✘ BUY_SIDE: if target TYPE stated → ask sub-type only, not type again
+ 
+  E. EXAMPLES:
+     "20 MW Solar SPV, Uttar Pradesh, transaction ready, available for acquisition"
+       → intent=SELL_SIDE, sector=renewable, geography=Uttar Pradesh
+       → skip: geography ✓, sector ✓
+       → ask only: deal_size (price expectation), structure confirmation
+       → M4 must load RENEWABLE SELL_SIDE questions
+ 
+     "buy a hospital in Pune, budget 50Cr"
+       → intent=BUY_SIDE, sector=pharma, geography=Pune, deal_size=50Cr
+       → skip: geography ✓, deal_size ✓
+       → ask only: structure, strategic rationale
+       → M4 must load PHARMA BUY_SIDE questions (sub-type: type of hospital)
+ 
+     "sell my hospital in Pune, revenue 15Cr"
+       → intent=SELL_SIDE, sector=pharma, geography=Pune, deal_size=15Cr
+       → ALL M3 Block 1 bullets skipped
+       → go directly to M4 PHARMA SELL_SIDE questions
+ 
+  BUY_SIDE sub-type rule: if user specified target type → ask sub-type not type.
+  Store sub-type in sub_sector field.
 
 STEP 2 — CHECK MODULE LIST:
   Look at: # MODULES IN THIS PROMPT
@@ -371,6 +460,18 @@ STEP 4 — MESSAGE FORMAT:
   Opening line: its own line, followed by bullets.
   Each bullet: starts on a new line with \n•
   Never merge lines. Each sentence or bullet must be on its own line.
+ 
+  OPTION-LISTING BAN (critical — applies to every bullet in every module):
+  ✘ NEVER list choices inside a question using "—", "or", commas, or slashes.
+     BAD:  "What scale — small, medium, or large?"
+     BAD:  "What type — hospital, clinic, or diagnostic?"
+     BAD:  "What profile — local, regional, or national reach?"
+     BAD:  "What service lines — solar development, operations, or maintenance?"
+     GOOD: "What scale of operation are you targeting?"
+     GOOD: "What type of hospital are you looking for?"
+     GOOD: "What geographic reach matters for the target?"
+     GOOD: "What service lines are most important to you?"
+  All questions must be open-ended. Never embed options. Never enumerate choices.
 
 SECTOR: exact lowercase keys only.
   pharma | manufacturing | saas | finserv | consumer | realestate |
@@ -416,6 +517,8 @@ Remind once: "Your inputs remain confidential. Share in ranges or descriptors �
   "Could you share" | "Tell me more" | "As an AI" | "As a chatbot"
 ✘ Skip the intermediary question on first turn — always required, always on its own line
 ✘ Ignore friction — acknowledge what's captured, ask only the missing piece
+✘ Repeat a question the user has already declined or deflected from
+✘ Block progress because a field is missing — acknowledge what's captured and move forward
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -428,6 +531,22 @@ const M2_PHASE_RULES = `
 ## PHASE: ENTRY
 Greeting only → "Welcome to DealCollab. Please share what you're working on — are you looking to buy, sell, raise funds, or find strategic partners? Describe your requirement in plain text."
 Direct mandate → qualification immediately. No greetings.
+
+## STRUCTURED CONTENT HANDLING
+If user pastes a pitch, teaser, IM, deal summary, bullet list, or structured asset description:
+  1. Treat ALL content as field data — extract every signal before generating questions.
+  2. Identify intent from the FRAMING of the content:
+     - "Acquisition opportunity", "available for acquisition", "SPV for sale" → SELL_SIDE
+     - "Looking to acquire", "seeking target" → BUY_SIDE
+     - "Raising funds", "seeking investment" → FUNDRAISING
+  3. Map asset type to sector immediately:
+     - Solar/Wind/MW/SPV/PPA/IPP → renewable
+     - Hospital/Clinic/Healthcare → pharma
+     - Manufacturing plant/factory → manufacturing
+     - SaaS/platform/ARR → saas
+     (apply full sector map — never default to saas for unknown tech terms)
+  4. After extracting all available fields, ask ONLY what's genuinely missing.
+  5. Never re-ask anything visible in the pasted content.
 
 ## PHASE: QUALIFICATION (pre-sufficiency)
 
@@ -464,9 +583,23 @@ Direct mandate → qualification immediately. No greetings.
 ### If ALL M3 core fields already provided:
   Skip Block 1. Intermediary question + Block 2 only.
 
-### Friction handling:
-  Synthesise captured → "One more set of questions:" → M4 only. Never re-ask M3.
-
+## FRICTION HANDLING
+Friction signals: user says "not sure", "don't know", "skip", "move on", "enough questions",
+  "can we proceed", "I'll share later", "not relevant", "confidential", "don't want to share",
+  or gives a short deflecting reply to a direct question.
+ 
+Rules:
+1. Do NOT repeat the same question.
+2. Acknowledge briefly what has been captured: "Noted — I have what I need on [fields captured]."
+3. Move forward with available data — proceed to the next phase, or close if sufficient.
+4. If the missing field is optional or a refinement, skip it silently.
+5. If the missing field is critical (sector, intent, or deal size) and user has deflected once,
+   ask ONE final reframe: "To find the right counterparties, the one thing that would help most
+   is [field]. Even a broad range works."
+6. If user deflects again after the reframe — drop it entirely. Set is_sufficient = true and
+   proceed to MOMENTUM or CLOSURE with what is available.
+7. Never express frustration, never explain at length why a field matters.
+ 
 ## M4 MANDATORY GATE
 m4_questions_asked must be TRUE before sufficiency. Set TRUE only when distinct M4 bullets in message.
 
@@ -494,25 +627,41 @@ I continuously work across the network 24×7. As relevant counterparties align, 
 
 const M3_SELL_SIDE = `
 ## M3: SELL-SIDE QUALIFICATION — Block 1
-
-ALWAYS FIRST — its own line, non-skippable on first turn:
+ 
+INTERMEDIARY QUESTION (always first, always its own line, non-skippable):
 "Are you the business owner / promoter, or an advisor representing a client?"
-[blank line after this question before the opening line]
-
-Opening line for Block 1 (on its own line, after the intermediary question):
+ 
+Opening line (only if Block 1 has questions to ask):
 "To position this correctly for relevant buyers, share:"
-
-Block 1 — ask ONLY fields not yet provided:
-\n• What does the business do, and where does it operate? [SKIP if sector + geography known]
-\n• What is the approximate annual revenue range? [SKIP if revenue known]
-\n• How would you describe the business size and financial profile? [SKIP if deal_size known]
-\n• What kind of transaction are you looking for — and what is driving that decision? [SKIP if structure known]
-
-All questions are open-ended. Do NOT list options inside any question.
-
-Optional: valuation expectation · preferred buyer type · timeline · reason for exit.
-
-MANDATORY: After Block 1, add Block 2 from ## M4 SECTOR INTELLIGENCE. Same message.
+ 
+Block 1 — CONDITIONAL. Evaluate each field individually:
+ 
+  IF sector NOT known AND geography NOT known:
+    \n• What does the business do, and where does it operate?
+  ELSE IF sector NOT known:
+    \n• What type of business is this?
+  ELSE IF geography NOT known:
+    \n• Where does the business operate?
+  ELSE:
+    → SKIP this bullet entirely
+ 
+  IF revenue NOT known AND deal_size NOT known AND sector NOT IN [renewable, realestate]:
+    \n• What is the approximate annual revenue?
+  ELSE:
+    → SKIP this bullet entirely
+ 
+  IF deal_size NOT known AND sector NOT IN [renewable, realestate]:
+    \n• How would you describe the overall size of the business?
+  ELSE:
+    → SKIP this bullet entirely
+ 
+  IF structure NOT known AND transaction type NOT implied:
+    \n• What kind of transaction are you looking for — full sale, partial stake, or something else?
+  ELSE:
+    → SKIP this bullet entirely
+ 
+FAST-PATH: If ALL bullets evaluate to SKIP → omit Block 1 opening line entirely.
+           Write intermediary question, blank line, then go straight to M4 Block 2.
 `.trim();
 
 const M3_BUY_SIDE = `
@@ -527,11 +676,14 @@ Use "you" if user says "I want to buy". Use "your client" only if confirmed advi
 Opening line for Block 1 (on its own line):
 "To match you with the right target, share:"
 
-Block 1 — ask ONLY fields not yet provided:
-\n• What geography are you targeting for the acquisition? [SKIP if geography known]
-\n• What is the approximate budget or ticket size? [SKIP if deal_size known]
+Block 1 — extract from full message first, then ask ONLY genuinely missing fields:
+\n• What geography are you targeting for the acquisition? [SKIP if geography known OR any location present]
+\n• What is the approximate budget or ticket size? [SKIP if deal_size known OR any Cr/figure present]
 \n• What kind of deal structure are you looking for — and what is driving that preference? [SKIP if structure known]
 \n• What is the strategic rationale behind this acquisition? [SKIP if intent_focus known]
+ 
+CRITICAL: If user pasted a pitch or deal brief, extract geography and deal_size first — likely already present. 
+Example: "buy a digital marketing agency in Pune, budget 15-20Cr" → bullets 1 and 2 skipped. Ask bullets 3 and 4 only.
 
 All questions are open-ended. Do NOT list options.
 
@@ -656,22 +808,29 @@ Buyer signals: capacity · certifications · customer access · manufacturing mo
 `.trim();
 
 const M4_SAAS = `
-## M4: SAAS / TECHNOLOGY — Block 2
+## M4: SAAS / TECHNOLOGY / DIGITAL SERVICES — Block 2
 Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
-
+ 
+Coverage: B2B SaaS · IT services · digital marketing agencies · AI products · data platforms · tech-enabled services.
+If sub_sector already set (e.g. "digital marketing agency"), do NOT ask sub-type again. Ask specifics of that sub-type.
+ 
 IF INTENT = BUY_SIDE or FUNDRAISING:
-\n• What sub-type of tech business are you looking for — B2B SaaS, IT services, AI product, or data platform?
-\n• What revenue profile matters — strong ARR, or open to project-based businesses?
-\n• Is proprietary IP or a defensible tech moat important for the target?
-\n• What customer type are you looking for — enterprise, SME, or sector-specific?
-
+  If sub_sector NOT set:
+  \n• What type of tech or digital business are you looking for — SaaS product, IT services, digital marketing agency, or AI platform?
+  If sub_sector IS set (e.g. digital marketing agency):
+  \n• What service lines matter most — SEO/performance, social media, creative, or full-service integrated?
+  Then always ask:
+  \n• What revenue profile matters — recurring retainer contracts, or open to project-based revenue?
+  \n• What client base are you targeting — brand clients, SME accounts, or agency networks?
+  \n• Is proprietary tooling, platform IP, or a key account list important for the target?
+ 
 IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
-\n• What does the product or platform do, and who pays for it?
-\n• What does the revenue profile look like — recurring vs project-based?
-\n• What is the customer base like — who are the buyers and how sticky are they?
-\n• What makes the business defensible — proprietary technology, IP, or platform moat?
-
-Buyer signals: recurring revenue · IP defensibility · low churn · enterprise contracts.
+\n• What does the business do, and how does it primarily earn — retainers, project fees, or performance-based?
+\n• What does the client base look like — who are the key accounts and how long-standing are they?
+\n• What is the revenue split between recurring and one-time work?
+\n• What makes the business defensible — relationships, proprietary tools, or team depth?
+ 
+Buyer signals: recurring revenue · IP defensibility · low churn · enterprise contracts · key account stability.
 `.trim();
 
 const M4_FINSERV = `
@@ -810,18 +969,18 @@ Buyer signals: asset ownership · brand defensibility · location quality · mar
 const M4_RENEWABLE = `
 ## M4: RENEWABLE ENERGY — Block 2
 Add as SEPARATE bullets after Block 1 in the SAME message. Each bullet on a new line.
-
+ 
 IF INTENT = BUY_SIDE or FUNDRAISING:
 \n• Are you looking for an operating IPP, EPC contractor, or development-stage project?
 \n• Is a PPA in place a requirement, or are you open to merchant or development risk?
 \n• What debt profile is acceptable for the target assets?
 \n• What technology type matters — solar, wind, hybrid, or technology-agnostic?
-
+ 
 IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
-\n• Is this an operating asset, EPC pipeline, or development-stage project?
-\n• Are PPAs in place — counterparty quality and tenure?
-\n• What is the debt structure on the assets?
-\n• Where does the value sit — operational yield or development upside?
+\n• What is the current status of the asset — operational, under construction, or at development stage?
+\n• Are power purchase agreements in place, and what is the counterparty and remaining tenure?
+\n• What does the existing debt structure look like — loan tenure, outstanding amount, and coverage ratios?
+\n• What is the installed or contracted capacity, and what technology type is the asset?
 
 Buyer signals: PPA quality · debt coverage · regulatory approvals.
 `.trim();
@@ -837,12 +996,17 @@ IF INTENT = BUY_SIDE or FUNDRAISING:
 \n• Is proprietary technology or IP a requirement for the target?
 
 IF INTENT = SELL_SIDE / DEBT / STRATEGIC_PARTNERSHIP:
-\n• What approvals, certifications, or offset credits does the business hold?
-\n• How does the business generate revenue — tenders, OEM, or product sales?
-\n• What is the technology or capability moat?
-\n• How diversified is the order book?
+\n• What is the current status of the asset — operational, under construction, or at development stage?
+\n• Are power purchase agreements in place, and what is the counterparty and remaining tenure?
+\n• What does the existing debt structure look like — loan tenure, outstanding amount, and coverage ratios?
+\n• What is the price expectation or valuation for the asset?
+ 
+NOTE: For renewable assets, store installed capacity (MW/MWp) in industry_data.capacity.
+Store asset status in industry_data.asset_status. Store PPA details in industry_data.ppa_details.
+Revenue is NOT required for renewable sell-side — capacity + geography + intent = sufficient.
+Set m4_questions_asked=true once these bullets appear in message.
 
-Buyer signals: DGQA/DRDO approvals · government relationships · technology moat · offset credits.
+Buyer signals: DGQA/DRDO approvals · government relationships · technology moat · offset credits, PPA quality · debt coverage · regulatory approvals · capacity scale.
 `.trim();
 
 const M4_MIXED = `
@@ -945,6 +1109,74 @@ export interface RouterOutput {
   tokenEstimate: number;
 }
 
+const PRE_FLIGHT_EXTRACTION = `
+# ██ MANDATORY PRE-FLIGHT — RUN THIS BEFORE GENERATING ANY RESPONSE ██
+# This block overrides all other instructions. Execute every step in order.
+ 
+## STEP A — READ THE FULL USER MESSAGE
+Read every word of the user's message including any pasted content, bullet lists,
+pitch text, deal summaries, or structured data.
+ 
+## STEP B — EXTRACT THESE FIELDS (mark each ✓ FOUND or ✗ MISSING)
+ 
+  INTENT:
+    Sell signals → "available for acquisition", "for sale", "RTB", "acquisition opportunity",
+      "transaction ready", "seeking buyer", "want to sell", "sell my", "exit"  → SELL_SIDE ✓
+    Buy signals → "want to buy", "looking to acquire", "buy a", "acquire a" → BUY_SIDE ✓
+    Score both. More matches wins. "acquisition" alone is NOT a buy signal.
+ 
+  SECTOR:
+    solar / wind / MW / MWp / SPV / PPA / IPP / open access / C&I / STU → renewable ✓
+    hospital / clinic / pharma / NABH / diagnostic / healthcare → pharma ✓
+    manufacturing / plant / factory / OEM / casting → manufacturing ✓
+    SaaS / software / platform / ARR / digital marketing / agency → saas ✓
+    (apply full map — never default to saas for unrecognized terms)
+ 
+  GEOGRAPHY:
+    Any city, state, district, or region mentioned → geography ✓
+    Examples: "Uttar Pradesh", "Pune", "Maharashtra", "Delhi NCR" → all count
+ 
+  DEAL SIZE / CAPACITY:
+    Any number with Cr / MW / MWp / MWdc / acres / sq ft / USD / % → deal_size ✓
+    For renewable: MW or MWp IS the deal_size — store it. Do NOT ask for revenue.
+    For realestate: acres / sq ft IS the deal_size — store it. Do NOT ask for revenue.
+    Examples: "20 MW", "~90 acres", "15 Cr", "15-20 Cr", "50 USD mn" → all count
+ 
+  STRUCTURE:
+    "full sale", "SPV sale", "stake sale", "100% acquisition", "asset sale" → structure ✓
+    "SPV available for acquisition" = full SPV sale → structure ✓
+ 
+## STEP C — BUILD THE SKIP LIST
+  For every field marked ✓ FOUND → add to SKIP LIST.
+  Fields on the SKIP LIST must NOT appear as questions in your response.
+  SKIP LIST example for "20 MW Solar SPV, Uttar Pradesh, available for acquisition":
+    ✓ intent=SELL_SIDE      → skip: transaction type question
+    ✓ sector=renewable      → skip: "what does the business do"
+    ✓ geography=UP          → skip: "where does it operate"
+    ✓ deal_size=20MW        → skip: "annual revenue range", "business size/financial profile"
+    ✓ structure=SPV sale    → skip: "what kind of transaction"
+    → RESULT: ALL M3 Block 1 bullets are skipped. Go directly to M4.
+ 
+## STEP D — VERIFY BEFORE WRITING
+  Before writing your first word of response, confirm:
+  □ Is intent set? If yes — am I using the correct M3 frame (sell-side vs buy-side)?
+  □ Is sector set? If yes — am I loading the correct M4 module for that sector?
+  □ Is geography set? If yes — geography question is OFF the list.
+  □ Is any size/capacity figure present? If yes — revenue AND size questions are OFF the list.
+  □ Is structure implied or stated? If yes — transaction type question is OFF the list.
+  □ Do any remaining questions contain option lists ("A, B, or C")? If yes — rewrite open-ended.
+ 
+  If ALL M3 Block 1 fields are on the SKIP LIST → skip Block 1 entirely. Start with M4 bullets.
+  If ALL fields including M4 are known → go directly to MOMENTUM or CLOSURE.
+ 
+## STEP E — SECTOR-TO-M4 MAP (verify you load the right module)
+  renewable  → M4 RENEWABLE questions (PPA, debt structure, asset status, price expectation)
+  pharma     → M4 PHARMA questions (type, scale, accreditations, operational profile)
+  saas       → M4 SAAS questions (sub-type, revenue profile, IP, customer base)
+  manufacturing → M4 MANUFACTURING questions (certifications, capacity, customers)
+  (never load SAAS questions for a renewable/solar/energy deal)
+`.trim();
+
 export function buildSystemPrompt(
   state: RouterState,
   matchedMandates: string | null,
@@ -973,18 +1205,32 @@ export function buildSystemPrompt(
 
   const m4Loaded = modules.some(m => m.key.startsWith('M4_'));
 
+  const knownFields = [
+    state.intent ? `intent=${state.intent}` : null,
+    state.sector ? `sector=${state.sector}` : null,
+    state.geography ? `geography="${state.geography}"` : null,
+    state.deal_size ? `deal_size="${state.deal_size}"` : null,
+    state.revenue ? `revenue="${state.revenue}"` : null,
+    state.structure ? `structure="${state.structure}"` : null,
+    state.sub_sector ? `sub_sector="${state.sub_sector}"` : null,
+  ].filter(Boolean);
+
   const phaseContext = [
     `\n# CURRENT CONVERSATION PHASE: ${state.phase}`,
     `# CURRENT INTENT: ${state.intent ?? 'unknown'}`,
     `# TURN: ${state.turn_count + 1} | REFINEMENTS USED: ${state.refinement_count}/3`,
     `# M4 QUESTIONS ASKED THIS SESSION: ${state.m4_questions_asked}`,
     `# MODULES IN THIS PROMPT: ${modules.map(m => m.key).join(', ')}`,
+    knownFields.length > 0
+      ? `# ██ ALREADY KNOWN — DO NOT ASK AGAIN: ${knownFields.join(' | ')}`
+      : `# NO FIELDS EXTRACTED YET`,
     m4Loaded
       ? `# ⚠ M4 IS LOADED — Block 2 sector questions are MANDATORY. Use intent-aware framing.`
       : `# M4 NOT LOADED — do not produce sector-specific questions this turn`,
   ].join('\n');
 
   const systemPrompt = [
+    PRE_FLIGHT_EXTRACTION,          // ← runs first, highest priority
     phaseContext,
     ...modules.map(m => m.content),
   ].join('\n\n---\n\n');

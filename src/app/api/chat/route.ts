@@ -368,20 +368,31 @@ export async function POST(req: NextRequest) {
 
     console.log("🧠 FINAL DATA:", JSON.stringify(extraction));
 
+    // Resolve deal_size from multiple possible sources
+    const resolvedDealSize =
+      s.deal_size ||
+      s.revenue ||
+      (s.industry_data?.capacity as string) ||
+      (s.industry_data?.installed_capacity as string) ||
+      null;
+
     if (isComplete) {
       console.log("✅ DATA COMPLETE - INSERTING INTO DB");
       try {
         // Parse deal size and revenue if they are strings like "10-50 Cr"
         const parseRange = (val: string | null) => {
           if (!val) return { min: null, max: null };
-          const matches = val.match(/(\d+)/g);
-          if (matches && matches.length >= 2) return { min: matches[0], max: matches[1] };
-          if (matches && matches.length === 1) return { min: matches[0], max: matches[0] };
+          // Handle ranges like "10-50 Cr", "20-30 MW", "15 to 20 Cr"
+          const rangeMatch = val.match(/(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:\.\d+)?)/i);
+          if (rangeMatch) return { min: rangeMatch[1], max: rangeMatch[2] };
+          // Handle single values like "20 MW", "15Cr", "~90 acres"
+          const singleMatch = val.match(/~?(\d+(?:\.\d+)?)/);
+          if (singleMatch) return { min: singleMatch[1], max: singleMatch[1] };
           return { min: null, max: null };
         };
 
-        const size = parseRange(s.deal_size);
-        const revenue = parseRange(s.revenue);
+        const size = parseRange(resolvedDealSize);
+        const revenue = parseRange(s.revenue || s.deal_size);
 
         // Step 3: Insert into Mandates
         const { error: mandateErr } = await supabase
@@ -397,6 +408,7 @@ export async function POST(req: NextRequest) {
             deal_size_max_cr: size.max,
             revenue_min_cr: revenue.min,
             revenue_max_cr: revenue.max,
+            // For non-Cr deals (MW, acres etc.) store raw string in special_conditions
             deal_structure: s.structure,
             special_conditions: s.industry_data ? [JSON.stringify(s.industry_data)] : [],
             urgency: "Medium",
