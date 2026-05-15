@@ -39,8 +39,7 @@
 export const REVERSE_INTENT_MAP: Record<string, string> = {
   SELL_SIDE: 'BUY_SIDE',
   BUY_SIDE: 'SELL_SIDE',
-  FUNDRAISING: 'INVESTMENT',
-  INVESTMENT: 'FUNDRAISING',
+  FUNDRAISING: 'BUY_SIDE',
   DEBT: 'DEBT',                         // Both sides valid
   STRATEGIC_PARTNERSHIP: 'STRATEGIC_PARTNERSHIP', // Both sides valid
 };

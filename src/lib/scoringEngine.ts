@@ -14,7 +14,7 @@ import { sectorAdjacency, sectorsAreCompatible } from './sectorMatrix';
 // ─────────────────────────────────────────────────────────────
 
 export const INTENT_FLIP: Record<NonNullable<DealIntent>, string[]> = {
-    BUY_SIDE: ['SELL_SIDE'],
+    BUY_SIDE: ['SELL_SIDE', 'FUNDRAISING'],
     SELL_SIDE: ['BUY_SIDE'],
     FUNDRAISING: ['BUY_SIDE'],
     DEBT: ['DEBT'],

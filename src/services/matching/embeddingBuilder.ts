@@ -14,7 +14,6 @@ export function buildSemanticNarrative(input: ProposalInput): string {
 
   const intentText = intent === 'BUY_SIDE' ? 'Strategic buyer seeking acquisition opportunities' 
                    : intent === 'SELL_SIDE' ? 'Established business seeking exit or divestment'
-                   : intent === 'INVESTMENT' ? 'Financial investor looking to deploy capital'
                    : intent === 'FUNDRAISING' ? 'Growth-stage business seeking capital infusion'
                    : 'Strategic mandate';
 
