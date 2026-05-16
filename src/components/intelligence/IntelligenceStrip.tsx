@@ -11,7 +11,7 @@ export default function IntelligenceStrip() {
   ];
 
   return (
-    <div className="relative z-30 w-full overflow-hidden py-8 border-y border-white/5 bg-white/[0.02] backdrop-blur-sm">
+    <div className="relative z-30 w-full overflow-hidden py-8">
       <div className="max-w-6xl mx-auto px-8">
         <div className="flex flex-wrap md:flex-nowrap items-center justify-center gap-x-12 gap-y-4">
           {signals.map((signal, index) => (
