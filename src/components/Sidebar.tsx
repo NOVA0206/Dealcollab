@@ -55,7 +55,7 @@ export default function Sidebar({ isCollapsed, onItemClick }: SidebarProps) {
   };
 
   return (
-    <aside className="w-full h-full bg-primary-soft flex flex-col py-8 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] border-r border-border">
+    <aside className="w-full h-full bg-brand-sidebar flex flex-col py-8 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] border-r border-border">
       {/* Top Section: Logo */}
       <div className="mb-10 px-6">
         <Link href="/home" className={`group flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} overflow-hidden`}>
@@ -70,7 +70,7 @@ export default function Sidebar({ isCollapsed, onItemClick }: SidebarProps) {
             />
           </div>
           {!isCollapsed && (
-            <span className="text-foreground font-black text-base tracking-tighter whitespace-nowrap">
+            <span className="text-[#F5F5F3] font-black text-base tracking-tighter whitespace-nowrap">
               DealCollab <span className="text-primary-hover">AI</span>
             </span>
           )}
@@ -89,16 +89,16 @@ export default function Sidebar({ isCollapsed, onItemClick }: SidebarProps) {
                 onClick={() => onItemClick?.()}
                 className={`group flex items-center ${isCollapsed ? 'justify-center' : 'justify-between px-3'} py-3 rounded-xl transition-all duration-300 w-full text-left ${
                   isActive 
-                    ? 'text-white bg-primary font-bold shadow-md shadow-primary/20' 
-                    : 'text-brand-secondary hover:text-foreground hover:bg-primary/10'
+                    ? 'text-[#F5F5F3] bg-[#1A1A1A] font-bold shadow-sm ring-1 ring-white/10' 
+                    : 'text-[#888888] hover:text-[#F5F5F3] hover:bg-white/5'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <item.icon size={20} className={`shrink-0 transition-all duration-300 ${isActive ? 'text-white' : 'group-hover:text-primary-hover'}`} />
+                  <item.icon size={20} className={`shrink-0 transition-all duration-300 ${isActive ? 'text-[#FF6A00]' : 'group-hover:text-[#F5F5F3]'}`} />
                   {!isCollapsed && <span className="text-[13px] tracking-tight">{item.name}</span>}
                 </div>
                 {!isCollapsed && item.badge !== undefined && item.badge > 0 && (
-                  <span className={`${isActive ? 'bg-white text-primary' : 'bg-primary text-white'} text-[10px] font-bold px-1.5 py-0.5 rounded-full`}>
+                  <span className={`${isActive ? 'bg-[#FF6A00] text-white' : 'bg-[#1A1A1A] text-[#F5F5F3] ring-1 ring-white/10'} text-[10px] font-bold px-1.5 py-0.5 rounded-full`}>
                     {item.badge}
                   </span>
                 )}
@@ -132,12 +132,12 @@ export default function Sidebar({ isCollapsed, onItemClick }: SidebarProps) {
                   onClick={() => handleChatClick(session.id)}
                   className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all duration-300 ${
                     activeChatId === session.id 
-                      ? 'bg-primary/20 border border-border shadow-sm text-foreground font-semibold' 
-                      : 'text-brand-secondary hover:bg-primary/10 hover:text-foreground'
+                      ? 'bg-[#1A1A1A] border border-white/10 shadow-sm text-[#F5F5F3] font-semibold' 
+                      : 'text-[#888888] hover:bg-white/5 hover:text-[#F5F5F3]'
                   } ${isCollapsed ? 'justify-center' : ''}`}
                 >
                   <div className="flex items-center gap-3 overflow-hidden">
-                    <MessageSquare size={16} className={`shrink-0 ${activeChatId === session.id ? 'text-primary-hover' : 'opacity-40'}`} />
+                    <MessageSquare size={16} className={`shrink-0 ${activeChatId === session.id ? 'text-[#FF6A00]' : 'opacity-40'}`} />
                     {!isCollapsed && <span className="text-xs truncate">{session.title}</span>}
                   </div>
                   {!isCollapsed && (
@@ -163,19 +163,19 @@ export default function Sidebar({ isCollapsed, onItemClick }: SidebarProps) {
            href="/profile"
            className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3 px-2'} py-3 rounded-2xl hover:bg-primary/10 transition-all group`}
          >
-           <div className="w-9 h-9 rounded-full bg-white border border-border flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative">
+           <div className="w-9 h-9 rounded-full bg-transparent border border-white/10 flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative">
              {profile?.userAvatar ? (
                <Image src={profile.userAvatar} alt="Avatar" width={36} height={36} className="w-full h-full object-cover" />
              ) : (
-               <User size={18} className="text-foreground" />
+               <User size={18} className="text-[#F5F5F3]" />
              )}
            </div>
            {!isCollapsed && (
              <div className="flex flex-col min-w-0">
-               <p className="text-xs font-black text-foreground truncate uppercase tracking-tight">
+               <p className="text-xs font-black text-[#F5F5F3] truncate uppercase tracking-tight">
                  {profile?.fullName || session?.user?.name || 'User'}
                </p>
-               <p className="text-[10px] text-brand-secondary truncate font-bold opacity-60">
+               <p className="text-[10px] text-[#888888] truncate font-bold opacity-60">
                  {profile?.email || session?.user?.email || ''}
                </p>
              </div>

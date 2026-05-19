@@ -200,13 +200,21 @@ export async function executeMatchmaking(input: ProposalInput): Promise<Matchmak
       const { error: insertErr } = await supabase.from('proposal_matches').insert(matchInserts);
       if (insertErr) console.warn('[M5] proposal_matches insert warning:', insertErr.message);
       console.log(`[M5] Persisted ${matchInserts.length} matches`);
+
+      // Trigger realtime notification
+      const { error: notifErr } = await supabase.from('notifications').insert([{
+        user_id: input.userId,
+        type: 'MATCH',
+        message: `DealCollab AI found ${matchInserts.length} high-confidence counterparty matches for your mandate.`,
+        is_read: 'false'
+      }]);
+      if (notifErr) console.warn('[M5] Failed to insert match notification:', notifErr.message);
     } else {
       // PHASE 7: Zero matches → save for async re-match
       await supabase.from('saved_searches').insert([{
         user_id: input.userId,
         proposal_id: input.mandateId,
         query_object: query as unknown as Record<string, unknown>,
-        embedding,
         status: 'PENDING',
       }]);
       console.log('[M5] Zero matches — saved_searches queued');

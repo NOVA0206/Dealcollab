@@ -32,24 +32,64 @@ export async function POST(req: NextRequest) {
     const supabase = await createServerSupabaseClient();
     if (!supabase) throw new Error("Supabase client failed to initialize");
 
-    // Parse multipart form data
-    let formData: FormData;
-    try {
-      formData = await req.formData();
-    } catch {
-      return NextResponse.json(
-        { error: 'Invalid form data. Make sure the file is sent as multipart/form-data.' },
-        { status: 400 }
-      );
-    }
+    let file: { name: string; type: string; size: number } | null = null;
+    let buffer: Buffer;
+    let publicUrl = '';
+    let isDirectUpload = false;
 
-    const file = formData.get('file') as File | null;
+    const contentType = req.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body = await req.json();
+      const { fileUrl, fileName, fileType, fileSize } = body;
 
-    if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided. Send the file as a "file" field in the form data.' },
-        { status: 400 }
-      );
+      if (!fileUrl || !fileName) {
+        return NextResponse.json(
+          { error: 'Missing fileUrl or fileName in request body' },
+          { status: 400 }
+        );
+      }
+
+      file = { name: fileName, type: fileType || '', size: fileSize || 0 };
+      publicUrl = fileUrl;
+      isDirectUpload = true;
+
+      console.log(`[PARSE] Processing pre-uploaded file from URL: ${fileUrl} | Name: ${fileName}`);
+
+      // Fetch file content into buffer
+      const fileRes = await fetch(fileUrl);
+      if (!fileRes.ok) {
+        throw new Error(`Failed to fetch pre-uploaded file from URL: ${fileRes.statusText}`);
+      }
+      const arrayBuffer = await fileRes.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+    } else {
+      // Parse multipart form data
+      let formData: FormData;
+      try {
+        formData = await req.formData();
+      } catch {
+        return NextResponse.json(
+          { error: 'Invalid form data. Make sure the file is sent as multipart/form-data.' },
+          { status: 400 }
+        );
+      }
+
+      const formFile = formData.get('file') as File | null;
+      if (!formFile) {
+        return NextResponse.json(
+          { error: 'No file provided. Send the file as a "file" field in the form data.' },
+          { status: 400 }
+        );
+      }
+
+      file = { name: formFile.name, type: formFile.type || '', size: formFile.size };
+      isDirectUpload = false;
+
+      console.log(`[PARSE] Processing form-data file: ${file.name} | Type: ${file.type} | Size: ${(file.size / 1024).toFixed(1)}KB`);
+
+      // Convert File to Buffer
+      const arrayBuffer = await formFile.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
     }
 
     // Validate file size
@@ -71,59 +111,56 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`[PARSE] Processing file: ${file.name} | Type: ${mimeType} | Size: ${(file.size / 1024).toFixed(1)}KB`);
+    if (!isDirectUpload) {
+      // 1. UPLOAD TO STORAGE (with retry logic for resilience against network timeouts)
+      const fileName = `${userId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
-    // Convert File to Buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+      let uploadErr = null;
+      const maxRetries = 5; // Increased for better resilience
 
-    // 1. UPLOAD TO STORAGE (with retry logic for resilience against network timeouts)
-    const fileName = `${userId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`[STORAGE] Upload attempt ${attempt}/${maxRetries} for ${fileName}...`);
+          const result = await supabase.storage
+            .from('pdfs')
+            .upload(fileName, buffer, {
+              contentType: mimeType,
+              upsert: true
+            });
 
-    let uploadErr = null;
-    const maxRetries = 5; // Increased for better resilience
+          if (!result.error) {
+            uploadErr = null;
+            console.log(`[STORAGE] Upload successful on attempt ${attempt}`);
+            break;
+          }
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`[STORAGE] Upload attempt ${attempt}/${maxRetries} for ${fileName}...`);
-        const result = await supabase.storage
-          .from('pdfs')
-          .upload(fileName, buffer, {
-            contentType: mimeType,
-            upsert: true
-          });
-
-        if (!result.error) {
-          uploadErr = null;
-          console.log(`[STORAGE] Upload successful on attempt ${attempt}`);
-          break;
+          uploadErr = result.error;
+          console.warn(`[STORAGE] Upload attempt ${attempt} failed:`, uploadErr.message);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          uploadErr = { message: msg };
+          console.warn(`[STORAGE] Upload attempt ${attempt} threw error:`, msg);
         }
 
-        uploadErr = result.error;
-        console.warn(`[STORAGE] Upload attempt ${attempt} failed:`, uploadErr.message);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        uploadErr = { message: msg };
-        console.warn(`[STORAGE] Upload attempt ${attempt} threw error:`, msg);
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.log(`[STORAGE] Waiting ${delay}ms before next attempt...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
 
-      if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000;
-        console.log(`[STORAGE] Waiting ${delay}ms before next attempt...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      if (uploadErr) {
+        console.error('[STORAGE] Final upload failure after all attempts:', uploadErr);
+        const isTimeout = uploadErr.message?.toLowerCase().includes('timeout') || uploadErr.message?.toLowerCase().includes('fetch failed');
+        throw new Error(`Failed to upload document${isTimeout ? ' due to network timeout or unstable connection' : ''}: ${uploadErr.message}. (Size: ${(file.size / 1024).toFixed(1)}KB)`);
       }
-    }
 
-    if (uploadErr) {
-      console.error('[STORAGE] Final upload failure after all attempts:', uploadErr);
-      const isTimeout = uploadErr.message?.toLowerCase().includes('timeout') || uploadErr.message?.toLowerCase().includes('fetch failed');
-      throw new Error(`Failed to upload document${isTimeout ? ' due to network timeout or unstable connection' : ''}: ${uploadErr.message}. (Size: ${(file.size / 1024).toFixed(1)}KB)`);
+      // 2. GET PUBLIC URL
+      const { data: { publicUrl: generatedPublicUrl } } = supabase.storage
+        .from('pdfs')
+        .getPublicUrl(fileName);
+      publicUrl = generatedPublicUrl;
     }
-
-    // 2. GET PUBLIC URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('pdfs')
-      .getPublicUrl(fileName);
 
     // 3. EXTRACT TEXT
     let extractedText = '';

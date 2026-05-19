@@ -64,7 +64,7 @@ export default function StatusButton({ status, isOpen, onClick }: StatusButtonPr
       break;
 
     case 'Approved':
-      label = 'Connect';
+      label = 'Connected';
       colorClass = 'bg-green-500 text-white hover:bg-green-600 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.2)]';
       isClickable = true;
       break;

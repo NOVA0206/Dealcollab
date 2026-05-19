@@ -1,15 +1,33 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import DealLogCard from '@/components/DealLogCard';
 import { DealLogSkeleton, EmptyState, ErrorState } from '@/components/Skeleton';
 import { DealStatus } from '@/components/StatusBadge';
 import { Match } from '@/components/MatchWindow';
-import { useNotifications } from '@/components/NotificationProvider';
 import { Search, X, Layers } from 'lucide-react';
 
+const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+interface DBMatch {
+  id: string;
+  score: string;
+  similarity: string;
+  reason?: string;
+  counterparty?: { sector: string; geography: string; intent: string };
+}
+
+interface DBDeal {
+  id: string;
+  intent?: string;
+  sectors?: string[];
+  geographies?: string[];
+  matches: DBMatch[];
+}
+
 interface Deal {
-  id: number;
+  id: string | number;
   deal: string;
   sector: string;
   region: string;
@@ -19,131 +37,48 @@ interface Deal {
   isConnectionActive?: boolean;
 }
 
-// Helper to create mock match objects conforming to new Match interface
-function mockMatch(id: string, label: string, sector: string, geography: string, intent: string, score: number, reason: string): Match {
-  return {
-    id,
-    rank: parseInt(id.replace(/\D/g, '')) || 1,
-    label,
-    proposalId: 'mock-proposal',
-    finalScore: score,
-    confidenceScore: score * 0.9,
-    scores: { intent: 0.95, industry: 0.85, financial: 0.7, niche: 0.6, geography: 0.03, similarity: 0.82 },
-    matchReason: reason,
-    counterparty: { sector, subSector: null, geography, intent, structure: null },
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  };
-}
-
-// Mock API simulation
-const fetchDealsData = async (): Promise<Deal[]> => {
-  await new Promise(resolve => setTimeout(resolve, 800));
-  return [
-    {
-      id: 1,
-      deal: "Startup Funding Round",
-      sector: "Fintech",
-      region: "North America",
-      status: "Matched",
-      isNew: true,
-      matches: [
-        mockMatch("p1", "P1", "finserv", "North America", "BUY_SIDE", 92.3, "Matched due to: finserv sector alignment, acquisition appetite, ticket size compatibility."),
-        mockMatch("p2", "P2", "finserv", "Global", "BUY_SIDE", 84.1, "Matched due to: enterprise software interest, financial compatibility, strategic rationale."),
-        mockMatch("p3", "P3", "saas", "North America", "BUY_SIDE", 76.8, "Matched due to: B2B SaaS expertise, geography overlap, niche technology alignment."),
-      ]
-    },
-    {
-      id: 2,
-      deal: "Infrastructure Merger Proposal",
-      sector: "Energy",
-      region: "Europe",
-      status: "Searching Match",
-      matches: []
-    },
-    {
-       id: 3,
-       deal: "Global Logistics Expansion",
-       sector: "Logistics",
-       region: "South Asia",
-       status: "Matched",
-       isConnectionActive: true,
-       matches: [
-         mockMatch("p1", "P1", "logistics", "South Asia", "BUY_SIDE", 88.5, "Matched due to: logistics sector match, last-mile delivery interest, regional geography overlap."),
-         mockMatch("p2", "P2", "logistics", "Global", "BUY_SIDE", 79.2, "Matched due to: supply chain expertise, infrastructure alignment, digital transformation interest."),
-         mockMatch("p3", "P3", "realestate", "South Asia", "BUY_SIDE", 65.4, "Matched due to: infrastructure focus, geography overlap, public-private partnership interest."),
-       ]
-    },
-    {
-      id: 4,
-      deal: "Healthcare AI Seed Round",
-      sector: "HealthTech",
-      region: "Global",
-      status: "Searching Match",
-      matches: []
-    }
-  ];
-};
-
-import FeatureLockedOverlay from '@/components/FeatureLockedOverlay';
-
 export default function DealLogPage() {
-  const isLocked = false; // Feature lock enabled
+  const isLocked = false;
   const router = useRouter();
-  const { addNotification } = useNotifications();
-  const [deals, setDeals] = useState<Deal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(false);
-  const [expandedDealId, setExpandedDealId] = useState<number | null>(null);
+  
+  const { data: rawDeals, error, mutate, isValidating } = useSWR('/api/deals', fetcher, {
+    refreshInterval: 15000, // Re-fetch every 15s for realtime feel
+  });
+
+  const loading = !rawDeals && !error;
+  const refreshing = isValidating && !!rawDeals;
+
+  const [expandedDealId, setExpandedDealId] = useState<string | number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Searching Match' | 'Matched'>('All');
-  
-  const getData = useCallback(async (isBackground = false) => {
-    if (!isBackground) setLoading(true);
-    else setRefreshing(true);
 
-    setError(false);
-    try {
-      const data = await fetchDealsData();
-      setDeals(data);
-      if (isBackground) {
-        addNotification({
-          type: 'success',
-          message: 'Deal statuses synced successfully.',
-          time: 'Just now'
-        });
-      }
-    } catch {
-      if (!isBackground) setError(true);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [addNotification]);
+  const deals: Deal[] = (rawDeals || []).map((dbDeal: DBDeal) => ({
+    id: dbDeal.id,
+    deal: `${dbDeal.intent || 'Deal'}: ${dbDeal.sectors?.[0] || 'Unknown Sector'}`,
+    sector: dbDeal.sectors?.[0] || 'Unknown',
+    region: dbDeal.geographies?.[0] || 'Global',
+    status: dbDeal.matches && dbDeal.matches.length > 0 ? "Matched" : "Searching Match",
+    matches: dbDeal.matches.map((m: DBMatch, i: number) => ({
+       id: m.id,
+       rank: i + 1,
+       label: `P${i+1}`,
+       proposalId: dbDeal.id,
+       finalScore: parseFloat(m.score) * 100,
+       confidenceScore: parseFloat(m.similarity) * 100,
+       matchReason: m.reason || 'AI alignment detected.',
+       counterparty: m.counterparty || { sector: 'Unknown', geography: 'Global', intent: 'UNKNOWN' },
+       status: 'ACTIVE',
+       createdAt: new Date().toISOString()
+    }))
+  }));
 
-  useEffect(() => {
-    // Defer initial fetch to avoid synchronous setState warning in effect body
-    const initTimer = setTimeout(() => {
-      getData();
-    }, 0);
-
-    const interval = setInterval(() => {
-      getData(true);
-    }, 45000); // 45 seconds Log refresh
-
-    return () => {
-      clearTimeout(initTimer);
-      clearInterval(interval);
-    };
-  }, [getData]);
-
-  const handleDelete = (id: number) => {
-    setDeals(prev => prev.filter(deal => deal.id !== id));
+  const handleDelete = async (id: string | number) => {
+    // Optimistic UI updates can be added here
+    mutate(rawDeals.filter((d: DBDeal) => d.id !== id), false);
     if (expandedDealId === id) setExpandedDealId(null);
   };
 
-  const handleToggleExpand = (id: number) => {
+  const handleToggleExpand = (id: string | number) => {
     setExpandedDealId(prev => prev === id ? null : id);
   };
 
@@ -171,9 +106,8 @@ export default function DealLogPage() {
   };
 
   return (
-    <div className={`relative flex-1 flex flex-col w-full bg-white ${isLocked ? 'h-screen overflow-hidden' : 'h-full'}`}>
-      {isLocked && <FeatureLockedOverlay />}
-      <div className={`flex-1 flex flex-col w-full p-6 sm:p-10 transition-all duration-700 ${isLocked ? 'pointer-events-none blur-md overflow-hidden' : 'overflow-y-auto'}`}>
+    <div className="relative flex-1 flex flex-col w-full bg-white h-full">
+      <div className="flex-1 flex flex-col w-full p-6 sm:p-10 transition-all duration-700 overflow-y-auto">
       
       {/* Top Bar Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-10">
@@ -243,7 +177,7 @@ export default function DealLogPage() {
         {loading ? (
           <DealLogSkeleton />
         ) : error ? (
-          <ErrorState onRetry={() => getData()} />
+          <ErrorState onRetry={() => mutate()} />
         ) : deals.length === 0 ? (
           <EmptyState 
             title="Your Deal Log is empty"

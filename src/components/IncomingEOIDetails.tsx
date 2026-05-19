@@ -8,18 +8,29 @@ interface IncomingEOIDetailsProps {
     dealDesc: string;
     match: string;
     matchDesc: string;
+    raw?: any;
   };
   onApprove: () => void;
   onDecline: () => void;
 }
 
+const formatSize = (min: any, max: any) => {
+  if (!min && !max) return 'Undisclosed';
+  const minVal = min ? Number(min) : null;
+  const maxVal = max ? Number(max) : null;
+  if (minVal && maxVal && minVal !== maxVal) return `₹${minVal}–${maxVal} Cr`;
+  return `₹${maxVal || minVal} Cr`;
+};
+
 export default function IncomingEOIDetails({ item, onApprove, onDecline }: IncomingEOIDetailsProps) {
-  // Mock EOI data (as if received)
+  const rawEoi = item.raw;
+  const rawDeal = rawEoi?.deal;
+
   const eoiData = {
-    intent: "Invest / Acquire",
-    background: "Managing Partner at a mid-market private equity fund specializing in logistics and supply chain optimization. Successfully exited 3 similar platforms in the last 5 years.",
-    interest: "Your regional last-mile network perfectly complements our existing portfolio company's line-haul operations. We see significant synergy in combining these assets.",
-    capacity: "$5M - $12M",
+    intent: rawDeal?.intent === 'BUY_SIDE' ? 'Acquisition / Investment' : 'Divestment / Sale',
+    background: `${rawEoi?.sender?.role || 'Principal'} at ${rawEoi?.sender?.firm_name || 'Confidential Firm'}. Focus: ${rawDeal?.sectors?.join(', ') || 'N/A'}.`,
+    interest: rawDeal?.normalised_text || "Strategic synergy match identified by our AI matchmaking engine.",
+    capacity: formatSize(rawDeal?.deal_size_min_cr, rawDeal?.deal_size_max_cr),
     strength: "High"
   };
 

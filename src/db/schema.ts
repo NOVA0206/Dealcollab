@@ -128,10 +128,10 @@ export const matches = pgTable('matches', {
 // 4. EOIs (Expressions of Interest)
 export const eois = pgTable('eois', {
   id: uuid('id').primaryKey().defaultRandom(),
-  dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'cascade' }).notNull(),
-  matchId: uuid('match_id').references(() => matches.id, { onDelete: 'cascade' }),
+  dealId: uuid('deal_id').references(() => proposals.id, { onDelete: 'cascade' }).notNull(),
+  matchId: uuid('match_id').references(() => proposalMatches.id, { onDelete: 'cascade' }),
   senderId: uuid('sender_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  receiverId: uuid('receiver_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  receiverId: uuid('receiver_id').references(() => users.id, { onDelete: 'cascade' }),
   status: eoiStatusEnum('status').default('sent').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
@@ -319,8 +319,8 @@ export const matchesRelations = relations(matches, ({ one }) => ({
 }));
 
 export const eoisRelations = relations(eois, ({ one }) => ({
-  deal: one(deals, { fields: [eois.dealId], references: [deals.id] }),
-  match: one(matches, { fields: [eois.matchId], references: [matches.id] }),
+  deal: one(proposals, { fields: [eois.dealId], references: [proposals.id] }),
+  match: one(proposalMatches, { fields: [eois.matchId], references: [proposalMatches.id] }),
   sender: one(users, { fields: [eois.senderId], references: [users.id], relationName: 'sender' }),
   receiver: one(users, { fields: [eois.receiverId], references: [users.id], relationName: 'receiver' }),
 }));

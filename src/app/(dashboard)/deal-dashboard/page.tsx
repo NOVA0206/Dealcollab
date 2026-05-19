@@ -1,120 +1,123 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
+import useSWR from 'swr';
 import DashboardRow, { DashboardDeal } from '@/components/DashboardRow';
+import { DashboardStatus } from '@/components/StatusButton';
 import { DashboardSkeleton, EmptyState, ErrorState } from '@/components/Skeleton';
 import SendEOIModal from '@/components/SendEOIModal';
-import { useNotifications } from '@/components/NotificationProvider';
 import { LayoutGrid, PlusCircle } from 'lucide-react';
 
-// Mock API simulation with expanded data
-const fetchDashboardData = async (): Promise<DashboardDeal[]> => {
-  await new Promise(resolve => setTimeout(resolve, 800));
-  return [
-    { 
-        id: 101, // Incoming
-        deal: "Acquisition Strategy: Cloud Infra", 
-        dealDesc: "Enterprise client looking for private cloud infrastructure partners.",
-        match: "Sarah Jenkins (Potential Partner)", 
-        matchDesc: "Managing Director at Ventura Capital with focus on Tech infrastructure.",
-        status: "EOI Received",
-        isIncoming: true
-    },
-    { 
-        id: 1, 
-        deal: "Startup Funding Round", 
-        dealDesc: "Series A funding looking for strategic investors in the fintech space.",
-        match: "Ventura Capital A", 
-        matchDesc: "Leading early-stage fintech investor with a focus on disruptive payment solutions.",
-        status: "Send EOI" 
-    },
-    { 
-        id: 2, 
-        deal: "Infrastructure Merger", 
-        dealDesc: "Seeking expansion partner for major regional railway project.",
-        match: "BuildCorp Infrastructure", 
-        matchDesc: "Established civil engineering firm specializing in large-scale transit networks.",
-        status: "EOI Sent — Awaiting Approval" 
-    },
-    { 
-        id: 3, 
-        deal: "SaaS Enterprise Expansion", 
-        dealDesc: "Enterprise software provider looking for European distribution channel.",
-        match: "EuroCloud Distribution", 
-        matchDesc: "Top-tier IT distributor with extensive network across DACH and BENELUX regions.",
-        status: "Approved" 
-    }
-  ];
-};
+const fetcher = (url: string) => fetch(url).then(res => res.json());
 
-import FeatureLockedOverlay from '@/components/FeatureLockedOverlay';
+interface EOIResponse {
+  id: string | number;
+  status: string;
+  deal?: { title?: string; sector?: string; size?: string };
+  sender?: { name?: string; role?: string; firm_name?: string };
+  receiver?: { name?: string; role?: string; firm_name?: string };
+}
 
 export default function DealDashboardPage() {
-  const isLocked = false; // Feature lock enabled
-  const { addNotification } = useNotifications();
-  const [data, setData] = useState<DashboardDeal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(false);
+  const { data: inboundData, error: inboundError, mutate: mutateInbound, isValidating: inboundVal } = useSWR('/api/eois?type=inbound', fetcher, { refreshInterval: 15000 });
+  const { data: outboundData, error: outboundError, mutate: mutateOutbound, isValidating: outboundVal } = useSWR('/api/eois?type=outbound', fetcher, { refreshInterval: 15000 });
+
+  const loading = !inboundData && !inboundError;
+  const refreshing = (inboundVal && !!inboundData) || (outboundVal && !!outboundData);
+  const error = inboundError || outboundError;
+
   const [eoiModal, setEoiModal] = useState<{isOpen: boolean, deal: DashboardDeal | null}>({
     isOpen: false,
     deal: null
   });
 
-  const getData = React.useCallback(async (isBackground = false) => {
-    if (!isBackground) setLoading(true);
-    else setRefreshing(true);
-    
-    setError(false);
-    try {
-      const result = await fetchDashboardData();
-      setData(result);
-      if (isBackground) {
-        addNotification({
-          type: 'success',
-          message: 'Dashboard status updated in real-time.',
-          time: 'Just now'
-        });
-      }
-    } catch {
-      if (!isBackground) setError(true);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [addNotification]);
+  // Map API eois to UI components
+  const formatEoi = (eoi: EOIResponse, isIncoming: boolean): DashboardDeal => {
+     let mappedStatus = eoi.status;
+     if (isIncoming && eoi.status === 'sent') mappedStatus = 'EOI Received';
+     if (!isIncoming && eoi.status === 'sent') mappedStatus = 'EOI Sent — Awaiting Approval';
+     if (eoi.status === 'approved') mappedStatus = 'Approved';
+     if (eoi.status === 'declined') mappedStatus = 'Declined';
 
-  useEffect(() => {
-    const initTimer = setTimeout(() => {
-      getData();
-    }, 0);
-    
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(() => {
-      getData(true);
-    }, 30000);
-    
-    return () => {
-      clearTimeout(initTimer);
-      clearInterval(interval);
-    };
-  }, [getData]);
+     const role = isIncoming ? eoi.sender?.role : eoi.receiver?.role;
+     const firmName = isIncoming ? eoi.sender?.firm_name : eoi.receiver?.firm_name;
+     let matchDesc = role || '';
+     if (firmName) {
+       matchDesc = matchDesc ? `${matchDesc} at ${firmName}` : firmName;
+     }
+
+     return {
+       id: eoi.id,
+       deal: eoi.deal?.title || "Active Deal",
+       dealDesc: `Sector: ${eoi.deal?.sector || 'N/A'}, Size: ${eoi.deal?.size || 'N/A'}`,
+       match: isIncoming ? eoi.sender?.name || '' : eoi.receiver?.name || '',
+       matchDesc,
+       status: mappedStatus as DashboardStatus,
+       isIncoming,
+       raw: eoi
+     }
+  };
+
+  const incomingEOIs: DashboardDeal[] = (inboundData || []).map((e: EOIResponse) => formatEoi(e, true));
+  const myProposals: DashboardDeal[] = (outboundData || []).map((e: EOIResponse) => formatEoi(e, false));
+  const data = [...incomingEOIs, ...myProposals];
+
+  const handleApproveEOI = async (eoiId: string | number) => {
+    try {
+      const res = await fetch('/api/eois', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: eoiId, status: 'approved' })
+      });
+      if (!res.ok) throw new Error('Failed to approve EOI');
+      mutateInbound();
+      mutateOutbound();
+    } catch (err: unknown) {
+      console.error('🔥 handleApproveEOI failed:', err);
+    }
+  };
+
+  const handleDeclineEOI = async (eoiId: string | number) => {
+    try {
+      const res = await fetch('/api/eois', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: eoiId, status: 'declined' })
+      });
+      if (!res.ok) throw new Error('Failed to decline EOI');
+      mutateInbound();
+      mutateOutbound();
+    } catch (err: unknown) {
+      console.error('🔥 handleDeclineEOI failed:', err);
+    }
+  };
+
+  const handleRemoveEOI = async (eoiId: string | number) => {
+    if (!confirm('Are you sure you want to remove this match? This will delete it permanently.')) return;
+    try {
+      const res = await fetch(`/api/eois?id=${eoiId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to remove EOI');
+      mutateInbound();
+      mutateOutbound();
+    } catch (err: unknown) {
+      console.error('🔥 handleRemoveEOI failed:', err);
+    }
+  };
 
   const handleEOIRequest = (item: DashboardDeal) => {
     setEoiModal({ isOpen: true, deal: item });
   };
 
   const handleEOISuccess = () => {
-    // Logic for successful EOI
+    mutateOutbound();
+    mutateInbound();
   };
 
-  const incomingEOIs = data.filter(item => item.isIncoming);
-  const myProposals = data.filter(item => !item.isIncoming);
-
   return (
-    <div className={`relative flex-1 flex flex-col w-full bg-white ${isLocked ? 'h-screen overflow-hidden' : 'h-full'}`}>
-      {isLocked && <FeatureLockedOverlay />}
-      <div className={`flex-1 flex flex-col w-full p-6 sm:p-10 transition-all duration-700 relative ${isLocked ? 'pointer-events-none blur-md overflow-hidden' : 'overflow-y-auto'}`}>
+    <div className="relative flex-1 flex flex-col w-full bg-white h-full">
+      <div className="flex-1 flex flex-col w-full p-6 sm:p-10 transition-all duration-700 relative overflow-y-auto">
       
       {/* Top Bar Section */}
       <div className="flex justify-between items-center mb-10">
@@ -149,7 +152,7 @@ export default function DealDashboardPage() {
         {loading ? (
           <DashboardSkeleton />
         ) : error ? (
-          <ErrorState onRetry={getData} />
+          <ErrorState onRetry={() => { mutateInbound(); mutateOutbound(); }} />
         ) : data.length === 0 ? (
           <EmptyState 
             title="No matches found yet" 
@@ -169,18 +172,32 @@ export default function DealDashboardPage() {
                 </div>
                 <div className="flex flex-col gap-6">
                   {incomingEOIs.map(item => (
-                    <DashboardRow key={item.id} item={item} onEOIClick={() => handleEOIRequest(item)} />
+                    <DashboardRow 
+                      key={item.id} 
+                      item={item} 
+                      onEOIClick={() => handleEOIRequest(item)}
+                      onApprove={() => handleApproveEOI(item.id)}
+                      onDecline={() => handleDeclineEOI(item.id)}
+                      onRemove={() => handleRemoveEOI(item.id)}
+                    />
                   ))}
                 </div>
               </div>
             )}
-
+ 
             {/* My Proposals Section */}
             <div className="space-y-6">
               <h2 className="text-xs font-black uppercase tracking-widest text-[#6B7280] px-1">My Proposals ({myProposals.length})</h2>
               <div className="flex flex-col gap-6">
                 {myProposals.map(item => (
-                  <DashboardRow key={item.id} item={item} onEOIClick={() => handleEOIRequest(item)} />
+                  <DashboardRow 
+                    key={item.id} 
+                    item={item} 
+                    onEOIClick={() => handleEOIRequest(item)}
+                    onApprove={() => handleApproveEOI(item.id)}
+                    onDecline={() => handleDeclineEOI(item.id)}
+                    onRemove={() => handleRemoveEOI(item.id)}
+                  />
                 ))}
               </div>
             </div>

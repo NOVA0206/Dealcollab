@@ -1,12 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --primary: #FFA000;
-  --primary-hover: #e69500;
-  --primary-soft: #FFF6E5;
-  --background: #FFFBF5;
-  --border: #FFE4B5;
-  --foreground: #2D241E;
+  --primary: #FF6A00;
+  --primary-hover: #E65C00;
+  --primary-soft: rgba(255, 106, 0, 0.08);
+  --background: #F5F5F3;
+  --background-secondary: #EAEAEA;
+  --border: rgba(17, 17, 17, 0.08);
+  --foreground: #111111;
+  --foreground-secondary: #4B5563;
+  --sidebar-surface: #111111;
+  --card-surface: rgba(255, 255, 255, 0.72);
+  --card-light: #D9D9D9;
+  --highlight-glow: rgba(255, 106, 0, 0.1);
+  --ai-accent: #111111;
 }
 
 @theme inline {
@@ -14,31 +21,56 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
   --color-background: var(--background);
+  --color-background-secondary: var(--background-secondary);
   --color-border: var(--border);
   --color-foreground: var(--foreground);
-  
-  --color-brand-sidebar: var(--primary-soft);
-  --color-brand-card: #FFFFFF;
-  --color-brand-secondary: #8B7E74;
+  --color-foreground-secondary: var(--foreground-secondary);
+
+  --color-brand-sidebar: var(--sidebar-surface);
+  --color-brand-card: var(--card-surface);
+  --color-brand-secondary: var(--foreground-secondary);
   --color-brand-accent: var(--primary);
-  --color-brand-accent-glow: rgba(255, 213, 128, 0.2);
+  --color-brand-accent-glow: rgba(249, 115, 22, 0.12);
   --color-brand-accent-hover: var(--primary-hover);
   --color-brand-border: var(--border);
+  --color-ai-accent: var(--ai-accent);
 
   @keyframes slide-in-top {
-    from { transform: translateY(-1rem); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+      transform: translateY(-1rem);
+      opacity: 0;
+    }
+
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
   }
 
   @keyframes scale-in-premium {
-    from { transform: scale(0.95); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
+    from {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 
   @keyframes glow-pulse {
-    0% { filter: drop-shadow(0 0 10px rgba(255, 213, 128, 0.2)); }
-    50% { filter: drop-shadow(0 0 25px rgba(255, 213, 128, 0.5)); }
-    100% { filter: drop-shadow(0 0 10px rgba(255, 213, 128, 0.2)); }
+    0% {
+      filter: drop-shadow(0 0 5px rgba(255, 106, 0, 0.05));
+    }
+
+    50% {
+      filter: drop-shadow(0 0 10px rgba(255, 106, 0, 0.1));
+    }
+
+    100% {
+      filter: drop-shadow(0 0 5px rgba(255, 106, 0, 0.05));
+    }
   }
 }
 
@@ -48,14 +80,39 @@
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.fade-in { animation-name: fade-in; }
-.slide-in-from-right-8 { animation-name: slide-in-right; }
-.slide-in-from-top-4 { animation-name: slide-in-top; }
-.zoom-in { animation-name: zoom-slow; }
-.scale-in-premium { animation-name: scale-in-premium; }
-.glow-pulse { animation-name: glow-pulse; animation-iteration-count: infinite; animation-duration: 3s; }
-.duration-700 { animation-duration: 700ms; }
-.duration-1000 { animation-duration: 1000ms; }
+.fade-in {
+  animation-name: fade-in;
+}
+
+.slide-in-from-right-8 {
+  animation-name: slide-in-right;
+}
+
+.slide-in-from-top-4 {
+  animation-name: slide-in-top;
+}
+
+.zoom-in {
+  animation-name: zoom-slow;
+}
+
+.scale-in-premium {
+  animation-name: scale-in-premium;
+}
+
+.glow-pulse {
+  animation-name: glow-pulse;
+  animation-iteration-count: infinite;
+  animation-duration: 3s;
+}
+
+.duration-700 {
+  animation-duration: 700ms;
+}
+
+.duration-1000 {
+  animation-duration: 1000ms;
+}
 
 body {
   background: var(--background);
@@ -76,15 +133,21 @@ body {
 }
 
 .scrollbar-hide {
-  -ms-overflow-style: none; /* IE and Edge */
-  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
 }
+
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
 
 @layer utilities {
   .chat-container-max {
-    @apply max-w-[700px] mx-auto w-full;
+    max-width: 700px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
   }
 }

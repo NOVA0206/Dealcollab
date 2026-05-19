@@ -60,15 +60,54 @@ export default function Home() {
       let documentIdLocal: string | null = null;
 
       if (file) {
-        console.log("=== UPLOADING FILE ===", file.name, file.type, file.size);
-        const formData = new FormData();
-        formData.append('file', file);
+        console.log("=== UPLOADING FILE DIRECT TO STORAGE ===", file.name, file.type, file.size);
+        
+        // 1. Get signed upload URL
+        const signedUrlRes = await fetch(`/api/profile/upload/signed-url?file=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}&bucket=pdfs`);
+        
+        if (!signedUrlRes.ok) {
+          const errData = await signedUrlRes.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to get upload authorization (status ${signedUrlRes.status})`);
+        }
+        
+        const { uploadUrl, path } = await signedUrlRes.json();
+        console.log("[CLIENT] Uploading directly to Supabase storage path:", path);
+        
+        // 2. Upload file directly using PUT
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': file.type,
+          },
+          body: file
+        });
+        
+        if (!uploadRes.ok) {
+          throw new Error(`Direct upload to storage failed with status ${uploadRes.status}`);
+        }
+        
+        // 3. Construct public URL
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable.");
+        }
+        const publicUrl = `${supabaseUrl}/storage/v1/object/public/pdfs/${path}`;
+        console.log("[CLIENT] Direct upload successful! Public URL:", publicUrl);
 
+        // 4. Send public URL to parse-document route for extraction
         let parseRes: Response;
         try {
           parseRes = await fetch('/api/chat/parse-document', {
             method: 'POST',
-            body: formData,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              fileUrl: publicUrl,
+              fileName: file.name,
+              fileType: file.type,
+              fileSize: file.size,
+            }),
           });
         } catch (fetchErr) {
           throw new Error(`Parse request failed: ${fetchErr}`);
@@ -197,9 +236,9 @@ export default function Home() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full relative bg-background overflow-hidden">
+    <div className="flex-1 flex flex-col h-full relative bg-transparent overflow-hidden">
       {/* Scrollable Message Area */}
-      <div className="flex-1 overflow-y-auto bg-background">
+      <div className="flex-1 overflow-y-auto bg-transparent">
         <div className="chat-container-max px-6 py-10 pb-40">
           {loading ? (
             <div className="max-w-3xl mx-auto">
@@ -207,7 +246,7 @@ export default function Home() {
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-primary-soft flex items-center justify-center mb-6 border border-border">
+              <div className="w-16 h-16 rounded-2xl bg-brand-sidebar flex items-center justify-center mb-6 border border-border">
                 <Plus size={32} className="text-primary-hover" />
               </div>
               <h2 className="text-2xl font-bold text-foreground mb-2 tracking-tight">Start a new conversation</h2>

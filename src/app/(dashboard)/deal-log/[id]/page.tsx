@@ -11,90 +11,120 @@ import { useUser } from '@/components/UserProvider';
 import { useNotifications } from '@/components/NotificationProvider';
 
 
-interface AnonymousMatch {
-  id: string;
-  type: string;
-  structure: string;
-  sectors: string[];
-  geography: string;
-  revenueRange: string;
-  specialConditions: string;
-  age: string;
-  matchScore: number;
-}
+import useSWR from 'swr';
 
-const mockMatchData: Record<string, AnonymousMatch> = {
-  "p1": {
-    id: "p1",
-    type: "M&A / Acquisition",
-    structure: "Cash + Earn-out (24 months)",
-    sectors: ["Fintech", "Payments Architecture", "AI Infrastructure"],
-    geography: "DACH Region (Germany, Austria, Switzerland)",
-    revenueRange: "$5M - $12M ARR",
-    specialConditions: "Founder retention required for 12 months. ISO 27001 certification preferred.",
-    age: "4 days ago",
-    matchScore: 94
-  },
-  "p2": {
-    id: "p2",
-    type: "Strategic Partnership",
-    structure: "Joint Venture / Revenue Share",
-    sectors: ["Enterprise SaaS", "Cloud Security"],
-    geography: "North America (Remote First)",
-    revenueRange: "Early Stage / Pre-revenue",
-    specialConditions: "Intellectual property must be jointly owned. No exclusive lock-in.",
-    age: "Today",
-    matchScore: 88
+const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+const getIntentLabel = (intent: string) => {
+  switch (intent) {
+    case 'BUY_SIDE': return 'Buy-Side Acquisition';
+    case 'SELL_SIDE': return 'Sell-Side Divestment';
+    case 'FUNDRAISING': return 'Equity Fundraising';
+    case 'INVESTMENT': return 'Strategic Investment';
+    case 'DEBT': return 'Debt Financing';
+    case 'STRATEGIC_PARTNERSHIP': return 'Strategic Partnership';
+    default: return intent;
   }
+};
+
+const formatSize = (min: any, max: any) => {
+  if (!min && !max) return 'Undisclosed';
+  const minVal = min ? Number(min) : null;
+  const maxVal = max ? Number(max) : null;
+  if (minVal && maxVal && minVal !== maxVal) return `₹${minVal}–${maxVal} Cr`;
+  return `₹${maxVal || minVal} Cr`;
 };
 
 export default function MatchDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { tokens, approveEOI } = useUser();
+  const { tokens, refreshProfile } = useUser();
   const { addNotification } = useNotifications();
   const id = params.id as string;
   
-  const [match, setMatch] = useState<AnonymousMatch | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, error, mutate } = useSWR(`/api/matches/detail/${id}`, fetcher);
   const [isSending, setIsSending] = useState(false);
 
-  useEffect(() => {
-    // Simulate API fetch
-    const timer = setTimeout(() => {
-      setMatch(mockMatchData[id] || mockMatchData["p1"]);
-      setLoading(false);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [id]);
+  if (error) return (
+    <div className="flex-1 p-10 max-w-4xl mx-auto w-full text-center space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
+      <h2 className="text-xl font-bold text-gray-800">Failed to load match details</h2>
+      <p className="text-sm text-gray-500">The match record may not exist or you do not have permission to view it.</p>
+      <button onClick={() => router.back()} className="px-6 py-2 bg-gray-800 text-white rounded-xl text-xs font-bold uppercase tracking-widest">
+        Go Back
+      </button>
+    </div>
+  );
 
-  const handleSendEOI = () => {
-    if ((tokens ?? 0) < 50) return;
-    
-    setIsSending(true);
-    // Simulate process
-    setTimeout(() => {
-      approveEOI(parseInt(id.replace('p', '')) * 1000); // Trigger token deduction in mock
-      addNotification({
-        type: 'success',
-        message: 'Expression of Interest sent successfully.',
-        time: 'Just now'
-      });
-      setIsSending(false);
-      router.push('/deal-dashboard');
-    }, 1500);
-  };
-
-  if (loading) return (
+  if (!data) return (
     <div className="flex-1 p-10 max-w-4xl mx-auto w-full space-y-8 animate-pulse">
        <div className="w-48 h-8 bg-gray-100 rounded-xl" />
        <div className="w-full h-96 bg-gray-50 rounded-[40px]" />
     </div>
   );
 
-  if (!match) return null;
-
+  const { match, counterparty, eoi } = data;
   const hasTokens = (tokens ?? 0) >= 50;
+
+  const handleSendEOI = async () => {
+    if ((tokens ?? 0) < 50) return;
+    
+    setIsSending(true);
+    try {
+      // 1. Create EOI record in database
+      const resEoi = await fetch('/api/eois', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dealId: match.proposalId,
+          matchId: match.id,
+          receiverId: counterparty.userId
+        })
+      });
+
+      if (!resEoi.ok) {
+        const err = await resEoi.json();
+        throw new Error(err.error || 'Failed to send Expression of Interest');
+      }
+
+      // 2. Debit tokens
+      const resTokens = await fetch('/api/profile/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'debit',
+          action: 'Connection with Deal',
+          amount: 50
+        })
+      });
+
+      if (!resTokens.ok) {
+        const err = await resTokens.json();
+        throw new Error(err.error || 'Failed to debit tokens');
+      }
+
+      // 3. Refresh user profile (so tokens in header update)
+      await refreshProfile();
+
+      addNotification({
+        type: 'success',
+        message: 'Expression of Interest sent successfully.',
+        time: 'Just now'
+      });
+      
+      mutate();
+      router.push('/deal-dashboard');
+    } catch (err: any) {
+      console.error(err);
+      addNotification({
+        type: 'error',
+        message: err.message || 'Something went wrong while sending EOI.',
+        time: 'Just now'
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col w-full h-full bg-[#F9FAFB] relative overflow-y-auto">
@@ -141,20 +171,26 @@ export default function MatchDetailPage() {
                     <div>
                        <p className="text-xs font-black uppercase tracking-[0.2em] text-[#6B7280]">Intelligence Match Score</p>
                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-2xl font-black text-[#1F2937]">{match.matchScore}%</span>
+                          <span className="text-2xl font-black text-[#1F2937]">{match.finalScore}%</span>
                           <div className="w-32 h-2 bg-gray-100 rounded-full overflow-hidden">
-                             <div className="h-full bg-gradient-to-r from-orange-400 to-[#F97316] rounded-full" style={{ width: `${match.matchScore}%` }} />
+                             <div className="h-full bg-gradient-to-r from-orange-400 to-[#F97316] rounded-full" style={{ width: `${match.finalScore}%` }} />
                           </div>
                        </div>
                     </div>
                  </div>
                  <div className="text-right">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Deal Age</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Match Type</p>
                     <p className="text-xs font-bold text-[#1F2937] flex items-center gap-1.5 mt-1">
                        <Clock size={12} className="text-gray-400" />
-                       {match.age}
+                       {match.matchArchetype}
                     </p>
                  </div>
+              </div>
+
+              {/* Match Reason */}
+              <div className="bg-orange-50/50 p-6 rounded-3xl border border-orange-100/50 space-y-2">
+                 <h3 className="text-xs font-black uppercase tracking-widest text-[#F97316]">Match Explanation</h3>
+                 <p className="text-sm font-medium text-gray-700 leading-relaxed">{match.matchReason}</p>
               </div>
 
               {/* Data Grid */}
@@ -163,8 +199,8 @@ export default function MatchDetailPage() {
                  <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Deal Type & Structure</label>
                     <div className="flex flex-col gap-1">
-                       <p className="text-base font-bold text-[#1F2937]">{match.type}</p>
-                       <p className="text-xs font-medium text-[#6B7280]">{match.structure}</p>
+                       <p className="text-base font-bold text-[#1F2937]">{getIntentLabel(counterparty.intent)}</p>
+                       <p className="text-xs font-medium text-[#6B7280]">{counterparty.dealStructure || 'Standard Structure'}</p>
                     </div>
                  </div>
 
@@ -172,14 +208,17 @@ export default function MatchDetailPage() {
                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Revenue Range / Size</label>
                     <p className="text-base font-bold text-[#1F2937] flex items-center gap-2">
                        <TrendingUp size={16} className="text-green-500" />
-                       {match.revenueRange}
+                       Size: {formatSize(counterparty.dealSizeMinCr, counterparty.dealSizeMaxCr)}
+                    </p>
+                    <p className="text-xs font-medium text-[#6B7280] pl-6">
+                       Revenue: {formatSize(counterparty.revenueMinCr, counterparty.revenueMaxCr)}
                     </p>
                  </div>
 
                  <div className="space-y-2 md:col-span-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Sector Focus</label>
                     <div className="flex flex-wrap gap-2 mt-1">
-                       {match.sectors.map(sector => (
+                       {counterparty.sectors.map((sector: string) => (
                           <span key={sector} className="px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl text-xs font-bold text-[#4B5563]">
                              {sector}
                           </span>
@@ -191,17 +230,36 @@ export default function MatchDetailPage() {
                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Geography</label>
                     <p className="text-base font-bold text-[#1F2937] flex items-center gap-2">
                        <Globe size={16} className="text-blue-500" />
-                       {match.geography}
+                       {counterparty.geographies.join(', ') || 'Global'}
                     </p>
                  </div>
 
                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Special Conditions & Notes</label>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Anonymized Preview</label>
                     <p className="text-sm font-medium text-[#4B5563] leading-relaxed bg-gray-50/50 p-4 rounded-2xl border border-gray-100 italic">
-                       &quot;{match.specialConditions}&quot;
+                       &quot;{counterparty.teaser || 'No preview available.'}&quot;
                     </p>
                  </div>
               </div>
+
+              {/* Reveal details if connected */}
+              {eoi?.status === 'approved' && counterparty.revealedContact && (
+                 <div className="bg-green-50 p-6 rounded-[24px] border border-green-100 space-y-4 animate-in fade-in duration-300">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-green-700 flex items-center gap-2">
+                       <ShieldCheck size={16} /> Verified Contact Information
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+                       <div>
+                          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Advisor Name</label>
+                          <p className="text-sm font-bold text-gray-800 mt-1">{counterparty.revealedContact.advisor || 'Not provided'}</p>
+                       </div>
+                       <div>
+                          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Contact Phone</label>
+                          <p className="text-sm font-bold text-gray-800 mt-1">{counterparty.revealedContact.phone || 'Not provided'}</p>
+                       </div>
+                    </div>
+                 </div>
+              )}
            </div>
 
            {/* CTA BLOCK */}
@@ -215,13 +273,19 @@ export default function MatchDetailPage() {
                           {hasTokens ? `Your balance: ${tokens ?? 0} tokens` : 'Insufficient tokens'}
                        </p>
                     </div>
-                    {tokens === 0 && (
-                       <p className="text-[10px] font-bold text-red-500">Balance: 0 tokens (Required: 50)</p>
-                    )}
                  </div>
 
                  <div className="flex flex-col items-center gap-3 w-full sm:w-auto">
-                    {hasTokens ? (
+                    {eoi ? (
+                       <button
+                         disabled
+                         className="w-full sm:w-auto bg-gray-200 text-gray-500 px-10 py-4 rounded-[20px] font-black text-xs uppercase tracking-widest cursor-not-allowed flex items-center justify-center gap-3"
+                       >
+                          {eoi.status === 'sent' && (eoi.isSender ? 'EOI Sent (Awaiting Approval)' : 'EOI Received')}
+                          {eoi.status === 'approved' && 'Connected'}
+                          {eoi.status === 'declined' && 'Declined'}
+                       </button>
+                    ) : hasTokens ? (
                        <button
                          onClick={handleSendEOI}
                          disabled={isSending}
@@ -256,7 +320,7 @@ export default function MatchDetailPage() {
                           </Link>
                        </div>
                     )}
-                    {hasTokens && (
+                    {!eoi && hasTokens && (
                       <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Token only deducted on approval</p>
                     )}
                  </div>

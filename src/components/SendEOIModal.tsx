@@ -2,11 +2,19 @@
 import React, { useState } from 'react';
 import { X, ChevronRight, CheckCircle2, Shield, Info, ArrowRight, Zap } from 'lucide-react';
 
+export interface SendEOIData {
+  intent: string;
+  background: string;
+  interest: string;
+  capacity: string;
+  notes: string;
+}
+
 interface SendEOIModalProps {
   isOpen: boolean;
   onClose: () => void;
   dealName: string;
-  onSuccess: (data: any) => void;
+  onSuccess: (data: SendEOIData) => void;
 }
 
 export default function SendEOIModal({ isOpen, onClose, dealName, onSuccess }: SendEOIModalProps) {
@@ -186,7 +194,7 @@ export default function SendEOIModal({ isOpen, onClose, dealName, onSuccess }: S
 
                   <div>
                     <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Strategic Interest</p>
-                    <p className="text-xs text-[#6B7280] leading-relaxed font-medium italic">"{formData.interest}"</p>
+                    <p className="text-xs text-[#6B7280] leading-relaxed font-medium italic">&quot;{formData.interest}&quot;</p>
                     <div className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-[#F97316]">
                        <Zap size={10} /> AI Refinement: Suggesting emphasizing previous sector exit
                     </div>

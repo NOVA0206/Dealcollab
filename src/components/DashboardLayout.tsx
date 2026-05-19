@@ -19,7 +19,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isStandalonePage = pathname?.includes('/eoi-review');
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-background font-sans antialiased text-foreground overflow-y-auto md:overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen bg-transparent font-sans antialiased text-foreground overflow-y-auto md:overflow-hidden">
       
       {/* Mobile Backdrop Overlay */}
       {isMobileSidebarOpen && (
@@ -33,7 +33,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {!isStandalonePage && (
         <div 
           className={`
-            fixed md:relative z-[100] h-full bg-primary-soft transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
+            fixed md:relative z-[100] h-full bg-brand-sidebar transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
             ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
             ${isSidebarCollapsed ? 'md:w-[80px]' : 'md:w-[260px]'}
             w-[280px] md:w-auto shrink-0 border-r border-border
@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       )}
       
-      <div className="flex-1 flex flex-col relative h-full bg-background">
+      <div className="flex-1 flex flex-col relative h-full bg-transparent">
         
         {/* Mobile Navbar */}
         {!isStandalonePage && (
@@ -69,10 +69,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="hidden md:flex absolute top-6 right-8 z-50 items-center gap-3">
             <Link 
               href="/profile/tokens"
-              className="flex items-center gap-2 px-4 py-2 bg-primary-soft border border-border rounded-full transition-all hover:bg-primary/20 group shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-brand-sidebar border border-border rounded-full transition-all hover:bg-[#222222] group shadow-sm"
             >
               <Coins size={14} className="text-primary-hover" />
-              <span className="text-xs font-bold text-foreground">
+              <span className="text-xs font-bold text-[#F5F5F3]">
                 {typeof tokens === 'number' ? tokens : '...'} Tokens
               </span>
             </Link>
@@ -81,7 +81,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
         
         {/* Main Content Area */}
-        <main className="flex-1 flex flex-col w-full h-full relative overflow-y-auto bg-background">
+        <main className="flex-1 flex flex-col w-full h-full relative overflow-y-auto bg-transparent">
           {children}
         </main>
       </div>

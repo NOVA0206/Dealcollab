@@ -8,6 +8,8 @@ interface ConnectionDetailsProps {
     dealDesc: string;
     match: string;
     matchDesc: string;
+    isIncoming?: boolean;
+    raw?: any;
   };
   onClose?: () => void;
 }
@@ -22,10 +24,14 @@ export default function ConnectionDetails({ item }: ConnectionDetailsProps) {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const rawEoi = item.raw;
+  const isIncoming = item.isIncoming;
+  const counterparty = isIncoming ? rawEoi?.sender : rawEoi?.receiver;
+
   const contactInfo = {
-    phone: "+1 (555) 0123-4567",
-    email: "contact@venturacapital.com",
-    whatsapp: "https://wa.me/155501234567"
+    phone: counterparty?.phone || "Not provided",
+    email: counterparty?.email || "Not provided",
+    whatsapp: counterparty?.phone ? `https://wa.me/${counterparty.phone.replace(/\D/g, '')}` : '#'
   };
 
   return (
@@ -63,19 +69,19 @@ export default function ConnectionDetails({ item }: ConnectionDetailsProps) {
                 <div className="grid grid-cols-2">
                    <div className="p-4 border-r border-b border-[#E5E7EB]">
                       <p className="text-[10px] font-bold text-[#6B7280] uppercase mb-1">Point of Contact</p>
-                      <p className="text-sm font-bold text-[#1F2937]">Sarah Jenkins</p>
+                      <p className="text-sm font-bold text-[#1F2937]">{counterparty?.name || 'N/A'}</p>
                    </div>
                    <div className="p-4 border-b border-[#E5E7EB]">
                       <p className="text-[10px] font-bold text-[#6B7280] uppercase mb-1">Firm / Fund</p>
-                      <p className="text-sm font-bold text-[#1F2937]">Ventura Capital A</p>
+                      <p className="text-sm font-bold text-[#1F2937]">{counterparty?.firm_name || 'N/A'}</p>
                    </div>
                    <div className="p-4 border-r border-[#E5E7EB]">
                       <p className="text-[10px] font-bold text-[#6B7280] uppercase mb-1">Position</p>
-                      <p className="text-sm font-bold text-[#1F2937]">Managing Director</p>
+                      <p className="text-sm font-bold text-[#1F2937]">{counterparty?.role || 'N/A'}</p>
                    </div>
                    <div className="p-4">
-                      <p className="text-[10px] font-bold text-[#6B7280] uppercase mb-1">Sector Expertise</p>
-                      <p className="text-sm font-bold text-[#1F2937]">Fintech / SaaS</p>
+                      <p className="text-[10px] font-bold text-[#6B7280] uppercase mb-1">Direct Email</p>
+                      <p className="text-sm font-bold text-[#1F2937] truncate">{counterparty?.email || 'N/A'}</p>
                    </div>
                 </div>
              </div>

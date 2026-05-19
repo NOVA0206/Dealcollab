@@ -13,61 +13,83 @@ interface NotificationContextType {
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
-// Mock Data
-const initialData: Notification[] = [
-  {
-    id: 1,
-    type: "match",
-    message: "New match found for 'Startup Funding Round'",
-    time: "2 mins ago",
-    isRead: false
-  },
-  {
-    id: 2,
-    type: "eoi_approved",
-    message: "Your EOI for 'Infrastructure Merger' was approved! Connect now.",
-    time: "10 mins ago",
-    isRead: false
-  },
-  {
-    id: 3,
-    type: "tokens_low",
-    message: "Low token balance. Top up to ensure you don't miss new matches.",
-    time: "1 hour ago",
-    isRead: false
-  },
-  {
-    id: 4,
-    type: "tokens_credited",
-    message: "Profile 100% complete. 100 Reward tokens credited.",
-    time: "Yesterday",
-    isRead: true
-  },
-  {
-    id: 5,
-    type: "eoi_declined",
-    message: "Your proposal for 'AgriTech Grant' was declined.",
-    time: "2 days ago",
-    isRead: true
-  }
-];
+import { createSupabaseClient } from '@/utils/supabase/client';
+import useSWR from 'swr';
+
+const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+function formatRelativeTime(dateString: string): string {
+  if (!dateString) return 'Just now';
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHr / 24);
+
+  if (diffSec < 30) return 'Just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { data: apiNotifications, mutate } = useSWR('/api/notifications', fetcher, { 
+    refreshInterval: 15000 
+  });
   
+  const [localNotifs, setLocalNotifs] = useState<Notification[]>([]);
+
   useEffect(() => {
-    // Initial fetch simulation
-    setNotifications(initialData);
-  }, []);
+    if (apiNotifications && Array.isArray(apiNotifications)) {
+      const mapped = apiNotifications.map((n: Record<string, unknown>) => ({
+        id: n.id as number,
+        type: String(n.type).toLowerCase() as Notification['type'],
+        message: String(n.message),
+        time: n.created_at ? formatRelativeTime(String(n.created_at)) : 'Just now',
+        isRead: n.is_read === 'true'
+      }));
+      // Delay state update to avoid synchronous cascading render warnings in React 19
+      Promise.resolve().then(() => setLocalNotifs(mapped));
+    }
+  }, [apiNotifications]);
+
+  useEffect(() => {
+    const supabase = createSupabaseClient();
+    if (!supabase) return;
+
+    const channel = supabase.channel('realtime-notifications')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, () => {
+         mutate(); // Re-fetch immediately when DB changes
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [mutate]);
+
+  const notifications = localNotifs;
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
-  const markAsRead = (id: number) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+  const markAsRead = async (id: number) => {
+    setLocalNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    await fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    mutate();
   };
 
   const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    setLocalNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
+    // Real implementation would have a mark-all route
   };
 
   const addNotification = (notif: Omit<Notification, 'id' | 'isRead'>) => {
@@ -76,13 +98,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       id: Date.now(),
       isRead: false
     };
-    setNotifications(prev => [newNotif, ...prev]);
+    setLocalNotifs(prev => [newNotif, ...prev]);
   };
 
   const refreshNotifications = async () => {
-    // Simulation of data refresh
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setNotifications(initialData);
+    await mutate();
   };
 
   return (

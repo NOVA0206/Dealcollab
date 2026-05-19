@@ -7,21 +7,25 @@ import ConnectionDetails from './ConnectionDetails';
 import IncomingEOIDetails from './IncomingEOIDetails';
 
 export interface DashboardDeal {
-  id: number;
+  id: string | number;
   deal: string;
   dealDesc: string;
   match: string;
   matchDesc: string;
   status: DashboardStatus;
   isIncoming?: boolean;
+  raw?: unknown;
 }
 
 interface DashboardRowProps {
   item: DashboardDeal;
   onEOIClick?: () => void;
+  onApprove?: () => void;
+  onDecline?: () => void;
+  onRemove?: () => void;
 }
 
-export default function DashboardRow({ item, onEOIClick }: DashboardRowProps) {
+export default function DashboardRow({ item, onEOIClick, onApprove, onDecline, onRemove }: DashboardRowProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const handleStatusClick = () => {
@@ -39,10 +43,10 @@ export default function DashboardRow({ item, onEOIClick }: DashboardRowProps) {
   return (
     <div className={`flex flex-col border transition-all duration-300 rounded-2xl shadow-sm ${
       isExpanded 
-        ? 'border-primary/50 bg-white ring-1 ring-primary/10' 
+        ? 'border-[rgba(17,17,17,0.12)] bg-white ring-1 ring-[rgba(17,17,17,0.04)] shadow-[0_8px_30px_rgb(0,0,0,0.06)]' 
         : isIncoming
-          ? 'bg-white border-primary/40 ring-1 ring-primary/20 shadow-[0_4px_20px_rgba(255,213,128,0.1)]'
-          : 'bg-primary-soft/30 border-border hover:bg-white hover:border-primary/40'
+          ? 'bg-white border-[#FF6A00]/30 ring-1 ring-[#FF6A00]/10 shadow-[0_4px_20px_rgb(0,0,0,0.04)]'
+          : 'bg-[#F5F5F3] border-[rgba(17,17,17,0.08)] hover:bg-white hover:border-[rgba(17,17,17,0.12)] hover:shadow-[0_4px_15px_rgb(0,0,0,0.03)]'
     }`}>
       <div className="grid grid-cols-1 sm:grid-cols-12 items-stretch gap-4 p-4">
         {/* YOUR DEAL */}
@@ -62,12 +66,23 @@ export default function DashboardRow({ item, onEOIClick }: DashboardRowProps) {
         </div>
 
         {/* STATUS BUTTON */}
-        <div className="sm:col-span-12 md:col-span-3 flex flex-col justify-center items-center md:items-end md:pt-6">
+        <div className="sm:col-span-12 md:col-span-3 flex flex-col justify-center items-center md:items-end md:pt-6 gap-2">
           <StatusButton 
             status={item.status} 
             isOpen={isExpanded}
             onClick={handleStatusClick}
           />
+          {onRemove && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              className="text-[10px] font-bold text-gray-400 hover:text-red-500 transition-all uppercase tracking-wider mt-1"
+            >
+              Remove Match
+            </button>
+          )}
         </div>
       </div>
 
@@ -76,8 +91,14 @@ export default function DashboardRow({ item, onEOIClick }: DashboardRowProps) {
         isIncoming ? (
           <IncomingEOIDetails 
             item={item} 
-            onApprove={() => setIsExpanded(false)} 
-            onDecline={() => setIsExpanded(false)} 
+            onApprove={() => {
+              onApprove?.();
+              setIsExpanded(false);
+            }} 
+            onDecline={() => {
+              onDecline?.();
+              setIsExpanded(false);
+            }} 
           />
         ) : (
           <ConnectionDetails item={item} />

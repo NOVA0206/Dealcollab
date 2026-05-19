@@ -83,6 +83,44 @@ export async function POST(req: NextRequest) {
             }, { status });
         }
 
+        // Success — sync with eois table so it appears on the Deal Dashboard
+        try {
+            const { data: matchRow } = await supabase
+                .from('proposal_matches')
+                .select('id')
+                .eq('proposal_id', body.proposalId)
+                .eq('matched_proposal_id', body.matchedProposalId)
+                .maybeSingle();
+
+            if (matchRow) {
+                const { data: existingEoi } = await supabase
+                    .from('eois')
+                    .select('id')
+                    .eq('match_id', matchRow.id)
+                    .maybeSingle();
+
+                if (!existingEoi) {
+                    const { data: cpProp } = await supabase
+                        .from('proposals')
+                        .select('user_id')
+                        .eq('id', body.matchedProposalId)
+                        .maybeSingle();
+
+                    await supabase
+                        .from('eois')
+                        .insert([{
+                            deal_id: body.proposalId,
+                            match_id: matchRow.id,
+                            sender_id: user.id,
+                            receiver_id: cpProp?.user_id || null,
+                            status: 'approved'
+                        }]);
+                }
+            }
+        } catch (syncErr) {
+            console.error('[CONNECT] Failed to sync EOI:', syncErr);
+        }
+
         // Success — reveal counterparty contact
         return NextResponse.json({
             success: true,
