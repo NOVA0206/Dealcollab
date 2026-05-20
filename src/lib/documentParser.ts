@@ -1,4 +1,3 @@
-import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 
 /**
@@ -115,13 +114,25 @@ export async function extractTextFromFile(
     else if (mimeType === 'application/pdf') {
       try {
         // Step A: Fast extraction
-        const parser = new PDFParse({ data: buffer });
-        try {
-          const data = await parser.getText();
-          extractedText = data.text.trim();
-        } finally {
-          await parser.destroy();
+        const pdfParseModule = (await import('pdf-parse')) as any;
+        const PDFParse = pdfParseModule.PDFParse || pdfParseModule.default;
+        
+        let extractedTextFromPdf = '';
+        if (PDFParse) {
+          const parser = new PDFParse({ data: buffer });
+          try {
+            const data = await parser.getText();
+            extractedTextFromPdf = data.text.trim();
+          } finally {
+            await parser.destroy();
+          }
+        } else {
+          // Fallback if the package exports a function directly (like standard pdf-parse)
+          const data = await pdfParseModule(buffer);
+          extractedTextFromPdf = data.text.trim();
         }
+        
+        extractedText = extractedTextFromPdf;
         
         console.log(`[PDF] Raw extraction length: ${extractedText.length}`);
 
