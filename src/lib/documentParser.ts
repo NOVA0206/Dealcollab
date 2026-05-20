@@ -1,6 +1,4 @@
-// lib/documentParser.ts
 import { PDFParse } from 'pdf-parse';
-import { createWorker } from 'tesseract.js';
 import mammoth from 'mammoth';
 
 /**
@@ -34,6 +32,7 @@ async function performOCR(buffer: Buffer): Promise<string> {
   let combinedText = "";
   
   try {
+    const { createWorker } = await import('tesseract.js');
     const worker = await createWorker('eng');
     
     // Note: In a production environment without GraphicsMagick/Ghostscript,

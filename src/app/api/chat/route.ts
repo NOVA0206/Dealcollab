@@ -503,6 +503,9 @@ export async function POST(req: NextRequest) {
       console.warn('[STATE] OCC conflict on chat_sessions update:', stateErr.message);
     }
 
+    // ─── FINAL RESPONSE ──────────────────────────────────────
+    const finalMessage = buildFinalMessage(extraction);
+
     // ─── CLOSURE BRANCH: DB PERSISTENCE + MATCHMAKING ─────────
     const s = extraction.state;
     const isComplete = updatedState.is_complete;
@@ -558,7 +561,7 @@ export async function POST(req: NextRequest) {
           .insert([{
             user_id: userId,
             raw_text: message,
-            normalised_text: message,
+            normalised_text: finalMessage,
             intent: canonicalIntent || 'BUY_SIDE', // proposals.intent is NOT NULL; fallback only if normalizer failed
             sectors: s.sector ? [s.sector] : [],
             geographies: s.geography ? [s.geography] : [],
@@ -671,9 +674,6 @@ export async function POST(req: NextRequest) {
         console.error("❌ DB INSERT/MATCHMAKING FAILED:", dbErr);
       }
     }
-
-    // ─── FINAL RESPONSE ──────────────────────────────────────
-    const finalMessage = buildFinalMessage(extraction);
 
     console.log(
       `[DEBUG] ${storedState.phase}→${updatedState.phase} | intermediary:${updatedState.is_intermediary} | sub_sector:${updatedState.sub_sector} | m4_asked:${updatedState.m4_questions_asked} | friction:${hasFriction}`,

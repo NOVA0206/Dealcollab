@@ -37,7 +37,8 @@ export async function GET() {
         deal_size_max_cr,
         status,
         created_at,
-        raw_text
+        raw_text,
+        normalised_text
       `)
       .eq('user_id', dbUser.id)
       .eq('status', 'ACTIVE')
@@ -70,7 +71,8 @@ export async function GET() {
           deal_size_min_cr,
           deal_size_max_cr,
           deal_structure,
-          raw_text
+          raw_text,
+          normalised_text
         )
       `)
       .in('proposal_id', proposalIds)
@@ -94,7 +96,8 @@ export async function GET() {
             geographies: cp.geographies,
             size_min: cp.deal_size_min_cr,
             size_max: cp.deal_size_max_cr,
-            raw_text: cp.raw_text
+            raw_text: cp.raw_text,
+            normalised_text: cp.normalised_text
           } : null
         };
       });

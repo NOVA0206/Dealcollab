@@ -10,12 +10,51 @@ import { Search, X, Layers } from 'lucide-react';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
+function generateFallbackSummary(intent?: string, sectors?: string[], geographies?: string[]): string {
+  const intentMap: Record<string, string> = {
+    'BUY_SIDE': 'acquisition opportunities',
+    'SELL_SIDE': 'strategic buyers or investors',
+    'FUNDRAISING': 'capital infusion',
+    'DEBT': 'debt financing',
+    'STRATEGIC_PARTNERSHIP': 'strategic partnerships'
+  };
+  
+  const intentStr = intentMap[intent || ''] || 'strategic opportunities';
+  const sectorStr = sectors?.length ? sectors.join(', ') : 'various sectors';
+  const geoStr = geographies?.length ? ` across ${geographies.join(', ')}` : '';
+  
+  return `Actively exploring ${intentStr} within the ${sectorStr} space${geoStr}.`;
+}
+
+function cleanSummaryText(text?: string, fallbackIntent?: string, fallbackSectors?: string[], fallbackGeographies?: string[]): string {
+  const fallback = generateFallbackSummary(fallbackIntent, fallbackSectors, fallbackGeographies);
+  
+  if (!text) return fallback;
+  const lower = text.toLowerCase().trim();
+  
+  // Filter out short confirmation messages and common "find me matches" phrases
+  if (
+    lower === 'yes' || lower === 'yess' || lower === 'confirm' ||
+    lower.includes('find me the matches') ||
+    lower.includes('go ahead') ||
+    lower.includes('start matching') ||
+    lower.length < 30
+  ) {
+    // Preserve if it looks like an AI-generated summary despite being short
+    if (lower.includes('your requirement') || lower.includes('got it') || lower.includes('captured your interest')) {
+      return text;
+    }
+    return fallback;
+  }
+  return text;
+}
+
 interface DBMatch {
   id: string;
   score: string;
   similarity: string;
   reason?: string;
-  counterparty?: { sector: string; geography: string; intent: string; raw_text?: string };
+  counterparty?: { sector: string; geography: string; intent: string; raw_text?: string; normalised_text?: string };
 }
 
 interface DBDeal {
@@ -25,6 +64,7 @@ interface DBDeal {
   geographies?: string[];
   matches: DBMatch[];
   raw_text?: string;
+  normalised_text?: string;
 }
 
 interface Deal {
@@ -33,6 +73,7 @@ interface Deal {
   sector: string;
   region: string;
   status: DealStatus;
+  summary: string;
   matches: Match[];
   isNew?: boolean;
   isConnectionActive?: boolean;
@@ -58,7 +99,7 @@ export default function DealLogPage() {
     deal: `${dbDeal.intent || 'Deal'}: ${dbDeal.sectors?.[0] || 'Unknown Sector'}`,
     sector: dbDeal.sectors?.[0] || 'Unknown',
     region: dbDeal.geographies?.[0] || 'Global',
-    summary: dbDeal.raw_text || '',
+    summary: cleanSummaryText(dbDeal.normalised_text || dbDeal.raw_text || '', dbDeal.intent, dbDeal.sectors, dbDeal.geographies),
     status: dbDeal.matches && dbDeal.matches.length > 0 ? "Matched" : "Searching Match",
     matches: dbDeal.matches.map((m: DBMatch, i: number) => ({
        id: m.id,
@@ -72,7 +113,7 @@ export default function DealLogPage() {
          sector: m.counterparty?.sector || 'Unknown', 
          geography: m.counterparty?.geography || 'Global', 
          intent: m.counterparty?.intent || 'UNKNOWN',
-         summary: m.counterparty?.raw_text || '' 
+         summary: cleanSummaryText(m.counterparty?.normalised_text || m.counterparty?.raw_text || '', m.counterparty?.intent, m.counterparty?.sector ? [m.counterparty.sector] : [], m.counterparty?.geography ? [m.counterparty.geography] : []) 
        },
        status: 'ACTIVE',
        createdAt: new Date().toISOString()

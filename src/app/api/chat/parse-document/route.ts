@@ -165,7 +165,10 @@ export async function POST(req: NextRequest) {
     // 3. EXTRACT TEXT
     let extractedText = '';
     try {
-      extractedText = await extractTextFromFile(buffer, mimeType);
+      extractedText = await Promise.race([
+        extractTextFromFile(buffer, mimeType),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("Document parsing timed out. Please try a smaller or text-based document.")), 9000))
+      ]);
     } catch (parseErr) {
       const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
       console.error('[PARSE] Extraction failed:', errMsg);
@@ -178,7 +181,10 @@ export async function POST(req: NextRequest) {
     const { cleanAndStructureDocument } = await import('@/lib/intelligenceEngine');
     let structuredData: Record<string, unknown> = {};
     try {
-      const raw = await cleanAndStructureDocument(cleanText);
+      const raw = await Promise.race([
+        cleanAndStructureDocument(cleanText),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Structuring timed out")), 15000))
+      ]);
       // Guard: if Groq returned HTML or a non-object, discard it
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
         structuredData = raw as unknown as Record<string, unknown>;
