@@ -187,6 +187,13 @@ export async function GET(
             };
         });
 
+        // 🔍 DEBUG: Print fetched matches to terminal
+        console.log(`\n[MATCHES_API] ✅ Fetched ${enriched.length} matches for proposal ${proposalID}:`);
+        enriched.forEach(m => {
+            console.log(`  ${m.rank} | Score: ${m.finalScore} | Intent: ${m.intent} | Sectors: ${m.sectors?.join(', ')} | Size: ${m.sizeRange ?? 'N/A'} | Reason: ${m.reason}`);
+        });
+        console.log(`[MATCHES_API] ──────────────────────────────────────────\n`);
+
         return NextResponse.json({
             proposalID,
             matchCount: enriched.length,

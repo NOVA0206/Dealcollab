@@ -139,6 +139,22 @@ export async function executeMatchmaking(input: ProposalInput): Promise<Matchmak
     if (searchErr) throw new Error(`Vector retrieval failed: ${searchErr.message}`);
     console.log(`[M5] Retrieved ${candidates?.length || 0} candidates`);
 
+    // PHASE 4B: Batch-fetch raw_text for all candidates so HR-6/HR-7 can inspect them.
+    // This avoids needing the SQL migration to add raw_text to the RPC return columns.
+    const candidateIds = (candidates || []).map((c: { id: string }) => c.id);
+    let rawTextMap = new Map<string, string>();
+    if (candidateIds.length > 0) {
+      const { data: rawRows } = await supabase
+        .from('proposals')
+        .select('id, raw_text, normalised_text')
+        .in('id', candidateIds);
+      if (rawRows) {
+        for (const row of rawRows) {
+          rawTextMap.set(row.id, row.raw_text || row.normalised_text || '');
+        }
+      }
+    }
+
     const query: ScoringQuery = {
       intent: input.intent,
       sector: input.sector,
@@ -156,6 +172,9 @@ export async function executeMatchmaking(input: ProposalInput): Promise<Matchmak
     const scored: ScoredMatch[] = [];
     let rejectionCount = 0;
     for (const c of (candidates as ScoringCandidate[]) || []) {
+      // Attach raw_text from batch fetch before hard rules run
+      c.raw_text = rawTextMap.get(c.id) || c.normalised_text || null;
+
       const hr = passesHardRules(query, c);
       if (!hr.passes) {
         console.log(`[M5] ❌ Candidate ${c.id.slice(0,8)} rejected: ${hr.reason}`);

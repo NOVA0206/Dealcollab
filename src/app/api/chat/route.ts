@@ -521,70 +521,81 @@ export async function POST(req: NextRequest) {
       null;
 
     if (isComplete) {
-      console.log("✅ DATA COMPLETE - INSERTING INTO DB");
-      try {
-        // ─ NORMALIZE INTENT to canonical (BUY_SIDE | SELL_SIDE | ...) ─
-        const canonicalIntent = normalizeIntent(extraction.intent);
+      if (storedState.proposal_id) {
+        console.log(`✅ DATA ALREADY COMPLETE - SKIPPING DB INSERTION (Reusing ${storedState.proposal_id})`);
+        returnedProposalId = storedState.proposal_id;
+      } else {
+        console.log("✅ DATA COMPLETE - INSERTING INTO DB");
+        try {
+          // ─ NORMALIZE INTENT to canonical (BUY_SIDE | SELL_SIDE | ...) ─
+          const canonicalIntent = normalizeIntent(extraction.intent);
 
-        // ─ PARSE SIZES via canonical normalizer (Cr / lakh / USD M / INR M) ─
-        const sizeNorm = resolvedDealSize ? normalizeSize(resolvedDealSize) : null;
-        const revRaw = s.revenue || s.deal_size || null;
-        const revNorm = revRaw ? normalizeSize(revRaw) : null;
+          // ─ PARSE SIZES via canonical normalizer (Cr / lakh / USD M / INR M) ─
+          const sizeNorm = resolvedDealSize ? normalizeSize(resolvedDealSize) : null;
+          const revRaw = s.revenue || s.deal_size || null;
+          const revNorm = revRaw ? normalizeSize(revRaw) : null;
 
-        const size = {
-          min: sizeNorm?.min_cr != null ? String(sizeNorm.min_cr) : null,
-          max: sizeNorm?.max_cr != null ? String(sizeNorm.max_cr) : null,
-        };
-        const revenue = {
-          min: revNorm?.min_cr != null ? String(revNorm.min_cr) : null,
-          max: revNorm?.max_cr != null ? String(revNorm.max_cr) : null,
-        };
+          const size = {
+            min: sizeNorm?.min_cr != null ? String(sizeNorm.min_cr) : null,
+            max: sizeNorm?.max_cr != null ? String(sizeNorm.max_cr) : null,
+          };
+          const revenue = {
+            min: revNorm?.min_cr != null ? String(revNorm.min_cr) : null,
+            max: revNorm?.max_cr != null ? String(revNorm.max_cr) : null,
+          };
 
-        // ─ COMPUTE QUALITY SCORE + TIER (DC-MATCH-001 §3.3) ─
-        const qScore = computeQualityScore({
-          rawText: JSON.stringify(extraction), // Use full extracted data for quality scoring
-          intent: canonicalIntent,
-          sector: s.sector ?? null,
-          geography: s.geography ?? null,
-          deal_size_min_cr: sizeNorm?.min_cr ?? null,
-          revenue_min_cr: revNorm?.min_cr ?? null,
-          structure: s.structure ?? null,
-          industry_data: s.industry_data,
-        });
-        const qTier = qualityTierFromScore(qScore);
+          // ─ COMPUTE QUALITY SCORE + TIER (DC-MATCH-001 §3.3) ─
+          const qScore = computeQualityScore({
+            rawText: JSON.stringify(extraction), // Use full extracted data for quality scoring
+            intent: canonicalIntent,
+            sector: s.sector ?? null,
+            geography: s.geography ?? null,
+            deal_size_min_cr: sizeNorm?.min_cr ?? null,
+            revenue_min_cr: revNorm?.min_cr ?? null,
+            structure: s.structure ?? null,
+            industry_data: s.industry_data,
+          });
+          const qTier = qualityTierFromScore(qScore);
 
-        console.log(`[QUALITY] score=${qScore} tier=${qTier} intent=${canonicalIntent}`);
+          console.log(`[QUALITY] score=${qScore} tier=${qTier} intent=${canonicalIntent}`);
 
-        // ─ INSERT INTO PROPOSALS (CANONICAL — matching source of truth) ─
-        const { data: proposalData, error: proposalErr } = await supabase
-          .from("proposals")
-          .insert([{
-            user_id: userId,
-            raw_text: message,
-            normalised_text: finalMessage,
-            intent: canonicalIntent || 'BUY_SIDE', // proposals.intent is NOT NULL; fallback only if normalizer failed
-            sectors: s.sector ? [s.sector] : [],
-            geographies: s.geography ? [s.geography] : [],
-            deal_size_min_cr: size.min,
-            deal_size_max_cr: size.max,
-            revenue_min_cr: revenue.min,
-            revenue_max_cr: revenue.max,
-            deal_structure: s.structure,
-            special_conditions: s.industry_data ? [JSON.stringify(s.industry_data)] : [],
-            quality_score: qScore,
-            quality_tier: qTier.toString(),
-            status: qTier === 4 ? 'PENDING_ENRICHMENT' : 'ACTIVE',
-            source: 'WEB',
-            embedding_status: 'PENDING',
-          }])
-          .select('id')
-          .single();
+          // ─ INSERT INTO PROPOSALS (CANONICAL — matching source of truth) ─
+          const { data: proposalData, error: proposalErr } = await supabase
+            .from("proposals")
+            .insert([{
+              user_id: userId,
+              raw_text: message,
+              normalised_text: finalMessage,
+              intent: canonicalIntent || 'BUY_SIDE', // proposals.intent is NOT NULL; fallback only if normalizer failed
+              sectors: s.sector ? [s.sector] : [],
+              geographies: s.geography ? [s.geography] : [],
+              deal_size_min_cr: size.min,
+              deal_size_max_cr: size.max,
+              revenue_min_cr: revenue.min,
+              revenue_max_cr: revenue.max,
+              deal_structure: s.structure,
+              special_conditions: s.industry_data ? [JSON.stringify(s.industry_data)] : [],
+              quality_score: qScore,
+              quality_tier: qTier.toString(),
+              status: qTier === 4 ? 'PENDING_ENRICHMENT' : 'ACTIVE',
+              source: 'WEB',
+              embedding_status: 'PENDING',
+            }])
+            .select('id')
+            .single();
 
-        if (proposalErr) {
-          console.error("❌ Proposal insert failed:", proposalErr);
-          throw new Error(proposalErr.message);
-        }
-        if (proposalData?.id) returnedProposalId = proposalData.id;
+          if (proposalErr) {
+            console.error("❌ Proposal insert failed:", proposalErr);
+            throw new Error(proposalErr.message);
+          }
+          
+          if (proposalData?.id) {
+            returnedProposalId = proposalData.id;
+            updatedState.proposal_id = proposalData.id;
+            await supabase.from('chat_sessions')
+              .update({ state: updatedState })
+              .eq('id', activeChatId);
+          }
 
         // ─ INSERT INTO MANDATES (LEGACY — preserved for backward compat) ─
         const { error: mandateErr } = await supabase
@@ -673,6 +684,7 @@ export async function POST(req: NextRequest) {
       } catch (dbErr) {
         console.error("❌ DB INSERT/MATCHMAKING FAILED:", dbErr);
       }
+      } // End of else block for !storedState.proposal_id
     }
 
     console.log(

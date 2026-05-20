@@ -95,12 +95,26 @@ export function sectorsAreCompatible(
     qSector: SectorKey | null,
     cSectors: (SectorKey | string)[] | null | undefined,
 ): boolean {
-    if (!qSector || !cSectors || cSectors.length === 0) return true;
+    // If query has no sector, any candidate is OK
+    if (!qSector) return true;
+    
+    // If query has a specific sector but candidate has NO sector tag,
+    // reject it — an untagged proposal is not a SaaS/pharma/finserv match.
+    if (!cSectors || cSectors.length === 0) return false;
+    
     const rule = SECTOR_COMPATIBILITY[qSector];
     if (!rule) return true;
 
     const cSet = cSectors.map(s => (typeof s === 'string' ? s.toLowerCase() : s) as SectorKey);
-    return !cSet.some(cs => rule.incompatible.includes(cs));
+    
+    // Reject if any of the candidate's sectors are explicitly incompatible
+    if (cSet.some(cs => rule.incompatible.includes(cs))) return false;
+    
+    // Also require at least one sector to be exact-match or adjacent
+    const hasRelevantSector = cSet.some(cs => 
+        rule.exact_match.includes(cs) || rule.adjacent.includes(cs)
+    );
+    return hasRelevantSector;
 }
 
 export type AdjacencyLevel = 'exact' | 'adjacent' | 'unrelated' | 'incompatible';

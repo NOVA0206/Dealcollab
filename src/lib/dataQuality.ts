@@ -181,6 +181,92 @@ export interface QualityInput {
     industry_data?: Record<string, unknown>;
 }
 
+// Shell company signal patterns — companies that exist on paper only
+const SHELL_SIGNALS = [
+    /turnover[:\s]*zero/i,
+    /annual turnover[:\s]*nil/i,
+    /turnover[:\s]*nil/i,
+    /zero turnover/i,
+    /no turnover/i,
+    /no business activity/i,
+    /non[- ]operative/i,
+    /dormant company/i,
+    /psc[:\s]*(?:₹?\s*)?[1-9]\s*lakh/i,        // paid-up share capital ≤ 9 lakh
+    /paid[- ]up capital[:\s]*(?:₹?\s*)?[1-9]\s*lakh/i,
+    /inc[- ]20a/i,                                // INC-20A is a dormancy declaration
+    /shell company/i,
+    /kindly\s+dm\s+me?\b/i,                       // "please DM me" = no real description
+    /available\s+for\s+sale\.?\s*please\s+dm/i,
+    /company\s+for\s+sell?[:\-|]/i,              // "Company for sell:- 1. Year:..." template
+    /nature of business\s+trading/i,             // Trading companies falsely tagged as SaaS
+    /trading\s+[na&]\s+distribution/i,           // Trading & Distribution
+    /trading\s+and\s+distribution/i,
+];
+
+/**
+ * Text signals that CONTRADICT a claimed sector.
+ * If a proposal claims 'saas' but the text says "Trading & Distribution", reject it.
+ */
+const SECTOR_CONTRADICTIONS: Record<string, RegExp[]> = {
+    saas: [
+        /nature of business\s+trading/i,
+        /trading\s+[na&]\s+distribution/i,
+        /trading\s+and\s+distribution/i,
+        /\bimport\s+export\b/i,
+        /\bwholesale\s+trade\b/i,
+        /\bmanufacturing\s+unit\b/i,
+        /\bfmcg\b/i,
+        /\btextiles?\b/i,
+        /\breal\s*estate\b/i,
+        /\bpharma(?:ceutical)?\b/i,
+        /\bhotel\b|\bhospitality\b/i,
+        /\bconstruction\s+company\b/i,
+    ],
+    finserv: [
+        /nature of business\s+trading/i,
+        /\bmanufacturing\s+unit\b/i,
+    ],
+    manufacturing: [
+        /\bsaas\s+platform\b/i,
+        /\bsoftware\s+company\b/i,
+    ],
+};
+
+// SaaS-specific legitimacy signals — must mention product/platform/revenue characteristics
+const SAAS_LEGITIMACY_SIGNALS = [
+    /\brecurring revenue\b/i,
+    /\barr\b/i,
+    /\bsaas\s+(?:platform|product|solution|tool|software)\b/i,
+    /\bsubscription(?:\s+model|\s+revenue)?\b/i,
+    /\bmonthly\s+recurring\b/i,
+    /\benterprise\s+(?:client|contract|saas)\b/i,
+    /\bchurn\b/i,
+    /\b(?:api|sdk|cloud[- ]native|multi[- ]tenant)\b/i,
+    /\bproprietary\s+(?:platform|software|technology)\b/i,
+];
+
+/**
+ * Returns true if the raw_text strongly indicates a shell/dormant company
+ * with no real operational SaaS business.
+ */
+export function isShellCompany(rawText: string): boolean {
+    if (!rawText) return false;
+    const shellHits = SHELL_SIGNALS.filter(re => re.test(rawText)).length;
+    return shellHits >= 1; // Even one hard signal is enough to flag it
+}
+
+/**
+ * Returns false if a proposal's claimed sector is contradicted by its actual text.
+ * e.g. a "Trading & Distribution" company claiming sector='saas' → false.
+ */
+export function isSectorLegitimate(claimedSector: string | null, rawText: string | null): boolean {
+    if (!claimedSector || !rawText) return true; // can't disprove → allow
+    const contradictions = SECTOR_CONTRADICTIONS[claimedSector.toLowerCase()];
+    if (!contradictions) return true;
+    // If ANY contradiction pattern fires, the sector claim is illegitimate
+    return !contradictions.some(re => re.test(rawText));
+}
+
 export function computeQualityScore(input: QualityInput): number {
     let score = 0;
     const len = (input.rawText || '').trim().length;
@@ -196,6 +282,9 @@ export function computeQualityScore(input: QualityInput): number {
     if (input.geography) score += 1;
     if (input.deal_size_min_cr || input.revenue_min_cr) score += 2;
     if (input.structure) score += 1;
+
+    // Penalize shell company signals heavily
+    if (isShellCompany(input.rawText)) score = Math.max(0, score - 5);
 
     return Math.min(score, 10);
 }

@@ -63,4 +63,5 @@ export interface RouterState {
   strategic_intent: string | null;
   round_count: number;
   m4_questions_asked: boolean;
+  proposal_id?: string | null;
 }

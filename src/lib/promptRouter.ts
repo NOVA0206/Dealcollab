@@ -125,6 +125,7 @@ export interface RouterState {
   round_count: number;  // RC8
   special_conditions: string[];
   strategic_intent: string | null;
+  proposal_id?: string | null;
 }
 
 export function createBlankState(): RouterState {

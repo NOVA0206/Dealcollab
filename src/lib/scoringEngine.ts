@@ -6,6 +6,7 @@
  */
 
 import type { QualityTier } from './dataQuality';
+import { isShellCompany, isSectorLegitimate } from './dataQuality';
 import type { DealIntent, SectorKey } from './promptRouter';
 import { sectorAdjacency, sectorsAreCompatible } from './sectorMatrix';
 
@@ -60,6 +61,8 @@ export interface ScoringCandidate {
     contact_phone: string | null;
     advisor_name: string | null;
     created_at: string;
+    raw_text: string | null;          // Used for HR-6 shell company detection
+    normalised_text: string | null;   // Fallback for shell detection
 }
 
 export interface ScoreBreakdown {
@@ -185,11 +188,20 @@ function structureCompatible(qStruct: string | null, cStruct: string | null): bo
 export function passesHardRules(query: ScoringQuery, cand: ScoringCandidate): RejectionResult {
     if (cand.status !== 'ACTIVE') return { passes: false, reason: `HR-5: status=${cand.status}` };
 
+    // HR-2: Size ratio check — directional.
+    // A large BUY_SIDE with a big budget can absolutely acquire a smaller target,
+    // so we only block if the SELLER is far larger than the BUYER'S budget.
     const qMid = midpoint(query.deal_size_min_cr, query.deal_size_max_cr) ?? midpoint(query.revenue_min_cr, query.revenue_max_cr);
     const cMid = midpoint(cand.deal_size_min_cr, cand.deal_size_max_cr) ?? midpoint(cand.revenue_min_cr, cand.revenue_max_cr);
     if (qMid != null && cMid != null && qMid > 0 && cMid > 0) {
-        const ratio = qMid > cMid ? qMid / cMid : cMid / qMid;
-        if (ratio > 10) return { passes: false, reason: `HR-2: size ratio ${ratio.toFixed(1)}× > 10×` };
+        if (query.intent === 'BUY_SIDE') {
+            // Block only if seller's ask is more than 5× the buyer's budget
+            if (cMid > qMid * 5) return { passes: false, reason: `HR-2: seller ask ${cMid} Cr >> buyer budget ${qMid} Cr` };
+        } else {
+            // For other intents, keep the original symmetric 10× cap
+            const ratio = qMid > cMid ? qMid / cMid : cMid / qMid;
+            if (ratio > 10) return { passes: false, reason: `HR-2: size ratio ${ratio.toFixed(1)}× > 10×` };
+        }
     }
 
     if (!structureCompatible(query.structure, cand.deal_structure)) {
@@ -198,6 +210,22 @@ export function passesHardRules(query: ScoringQuery, cand: ScoringCandidate): Re
 
     if (!sectorsAreCompatible(query.sector, cand.sectors)) {
         return { passes: false, reason: `HR-4: sectors incompatible` };
+    }
+
+    // HR-6: Shell company detection — reject dormant/paper companies with zero turnover,
+    // ₹1-10L capital, INC-20A filings, or "Company for sell:- Year: ..." template posts.
+    const textToCheck = cand.raw_text || cand.normalised_text || '';
+    if (textToCheck && isShellCompany(textToCheck)) {
+        return { passes: false, reason: `HR-6: shell/dormant company detected` };
+    }
+
+    // HR-7: Sector legitimacy — reject candidates whose text contradicts their claimed sector.
+    // e.g. a company saying "Trading N Distribution" but tagged as 'saas' → rejected.
+    if (query.sector && cand.sectors && cand.sectors.length > 0 && textToCheck) {
+        const claimedSector = cand.sectors[0]; // Check primary claimed sector
+        if (!isSectorLegitimate(claimedSector, textToCheck)) {
+            return { passes: false, reason: `HR-7: claimed sector '${claimedSector}' contradicted by company description` };
+        }
     }
 
     return { passes: true };

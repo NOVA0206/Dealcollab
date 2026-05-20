@@ -26,56 +26,64 @@ function cleanText(text: string): string {
 async function performOCR(buffer: Buffer): Promise<string> {
   console.log("[OCR] Starting extraction for scanned document...");
   
-  // We process a limited number of pages for performance (Next.js timeout limits)
-  const MAX_PAGES = 3; 
-  let combinedText = "";
-  
-  try {
-    const { createWorker } = await import('tesseract.js');
-    const worker = await createWorker('eng');
-    
-    // Note: In a production environment without GraphicsMagick/Ghostscript,
-    // pdf2pic might fail. We use a try-catch to ensure we don't crash.
-    // For local Windows development, the user should have these installed 
-    // if they want high-quality OCR, otherwise we log the failure.
-    
-    try {
-      const { fromBuffer } = await import('pdf2pic');
-      const options = {
-        density: 100,
-        format: "png",
-        width: 800,
-        height: 1100
-      };
+  return Promise.race([
+    (async () => {
+      const MAX_PAGES = 3; 
+      let combinedText = "";
       
-      const convert = fromBuffer(buffer, options);
-      
-      for (let i = 1; i <= MAX_PAGES; i++) {
+      try {
+        const { createWorker } = await import('tesseract.js');
+        const worker = await createWorker('eng');
+        
+        // Note: In a production environment without GraphicsMagick/Ghostscript,
+        // this pdf2pic conversion WILL fail or hang. 
         try {
-          const page = await convert(i, true);
-          if (page && 'base64' in page && page.base64) {
-            console.log(`[OCR] Processing page ${i}...`);
-            const pageBuffer = Buffer.from(page.base64, 'base64');
-            const { data: { text } } = await worker.recognize(pageBuffer);
-            combinedText += `\n--- Page ${i} ---\n${text}`;
+          const pdf2pic = await import('pdf2pic');
+          const options = {
+            density: 100,
+            saveFilename: "page",
+            savePath: "/tmp",
+            format: "png",
+            width: 800,
+            height: 1100
+          };
+          const convert = pdf2pic.fromBuffer(buffer, options);
+
+          let i = 1;
+          while (true) {
+            try {
+              const page = await convert(i, true);
+              if (page && 'base64' in page && page.base64) {
+                const { data: { text } } = await worker.recognize(`data:image/png;base64,${page.base64}`);
+                combinedText += `\n--- Page ${i} ---\n${text}`;
+                i++;
+              } else {
+                break; // No more pages returned
+              }
+            } catch (pageErr) {
+              console.log(`[OCR] Finished processing all ${i - 1} pages.`);
+              break;
+            }
           }
-        } catch (pageErr) {
-          console.warn(`[OCR] Failed to convert page ${i}:`, pageErr);
-          break; // Stop if we can't convert pages
+        } catch (pdfErr) {
+          console.warn("[OCR] pdf2pic failed, usually means GraphicsMagick/Ghostscript is missing on Vercel.");
+          combinedText = "[OCR Error] Dependencies missing for scanned document parsing. Please upload a text-based PDF.";
         }
+        
+        await worker.terminate();
+        return combinedText.trim() || "[OCR Error] No text extracted.";
+      } catch (err) {
+        console.error("[OCR] Full OCR process failed:", err);
+        return "[OCR Critical Failure] Could not process document images.";
       }
-    } catch (picErr) {
-      console.error("[OCR] pdf2pic initialization failed. Ensure GraphicsMagick is installed.", picErr);
-      combinedText = "[OCR Error] Dependencies missing for scanned document parsing. Please upload a text-based PDF.";
-    }
-
-    await worker.terminate();
-  } catch (err) {
-    console.error("[OCR] Critical failure:", err);
-    combinedText = "[OCR Critical Failure] Could not process document images.";
-  }
-
-  return combinedText;
+    })(),
+    new Promise<string>((_, reject) => 
+      setTimeout(() => reject(new Error("OCR timed out because Ghostscript is not available on Vercel or the document is too large.")), 240000)
+    ).catch(e => {
+       console.error(e.message);
+       return "[OCR Timeout] Document was too large or OCR engine stalled. Please try a text-based PDF.";
+    })
+  ]);
 }
 
 export async function extractDocxText(fileBuffer: Buffer): Promise<string> {
