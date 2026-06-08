@@ -39,6 +39,7 @@ export async function GET() {
         created_at,
         raw_text,
         normalised_text,
+        summary_text,
         metadata
       `)
       .eq('user_id', dbUser.id)
@@ -74,6 +75,7 @@ export async function GET() {
           deal_structure,
           raw_text,
           normalised_text,
+          summary_text,
           metadata
         )
       `)
@@ -100,6 +102,7 @@ export async function GET() {
             size_max: cp.deal_size_max_cr,
             raw_text: cp.raw_text,
             normalised_text: cp.normalised_text,
+            summary_text: cp.summary_text as string | null ?? null,
             mandate_summary: (cp.metadata as Record<string, unknown> | null)?.mandate_summary as string | null ?? null,
           } : null
         };
@@ -112,8 +115,9 @@ export async function GET() {
     });
 
     return NextResponse.json(hydratedDeals);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
     console.error("🔥 GET /api/deals ERROR:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

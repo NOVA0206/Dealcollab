@@ -27,6 +27,7 @@ interface MatchRow {
     deal_structure: string | null;
     quality_tier: string | null;
     raw_text: string | null;
+    summary_text: string | null;
 }
 
 interface ParsedReason {
@@ -58,16 +59,6 @@ function summarizeDeal(p: MatchRow): string {
     }
     if (p.geographies?.length) parts.push(p.geographies[0]);
     return parts.join(' · ');
-}
-
-function snippetFromRawText(text: string | null): string {
-    if (!text) return '';
-    // strip phone numbers, emails, advisor names — basic redaction
-    const redacted = text
-        .replace(/\b[6-9]\d{9}\b/g, '[redacted]')
-        .replace(/\S+@\S+\.\S+/g, '[redacted]')
-        .replace(/\bcontact\s*[:\-]?.*$/gi, '');
-    return redacted.slice(0, 280).trim() + (redacted.length > 280 ? '…' : '');
 }
 
 export async function GET(
@@ -168,7 +159,7 @@ export async function GET(
             .from('proposals')
             .select(`
         id, intent, sectors, geographies, deal_size_min_cr, deal_size_max_cr,
-        revenue_min_cr, revenue_max_cr, deal_structure, quality_tier, raw_text
+        revenue_min_cr, revenue_max_cr, deal_structure, quality_tier, raw_text, summary_text
       `)
             .in('id', matchedIds);
 
@@ -219,7 +210,7 @@ export async function GET(
                 sizeRange: cp?.deal_size_min_cr && cp?.deal_size_max_cr
                     ? `₹${cp.deal_size_min_cr}–${cp.deal_size_max_cr} Cr`
                     : cp?.deal_size_min_cr ? `₹${cp.deal_size_min_cr} Cr` : null,
-                teaser: cp ? snippetFromRawText(cp.raw_text) : '',
+                teaser: cp?.summary_text || cp?.raw_text || '',
                 qualityTier: cp?.quality_tier ?? null,
                 // Connection state
                 isConnected,

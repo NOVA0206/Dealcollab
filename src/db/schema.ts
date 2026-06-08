@@ -210,6 +210,7 @@ export const proposals = pgTable('proposals', {
   refCode: text('ref_code'),
   metadata: jsonb('metadata').default({}),
   embeddingStatus: text('embedding_status').default('PENDING'),
+  summaryText: text('summary_text'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
