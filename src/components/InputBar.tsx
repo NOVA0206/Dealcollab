@@ -60,15 +60,15 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
   return (
     <div className="w-full bg-transparent pb-8 pt-2 px-4 md:px-6">
       <div className="max-w-3xl mx-auto relative group">
-        <input 
+        <input
           type="file"
           ref={fileInputRef}
           onChange={handleFileChange}
           className="hidden"
           accept=".pdf,.doc,.docx,.txt,image/*"
         />
-        
-        <form 
+
+        <form
           onSubmit={handleSubmit}
           className="flex flex-col bg-[rgba(255,255,255,0.72)] backdrop-blur-xl border border-[rgba(17,17,17,0.08)] rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all focus-within:ring-1 focus-within:ring-[#FF6A00]/30 focus-within:border-[#FF6A00]/50 overflow-hidden"
         >
@@ -81,7 +81,7 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
               <span className="text-xs font-semibold text-[#111111] truncate max-w-[200px]">
                 {pendingFile.name}
               </span>
-              <button 
+              <button
                 type="button"
                 onClick={() => setPendingFile(null)}
                 className="ml-auto p-1 hover:bg-black/5 rounded-full transition-colors"
@@ -92,7 +92,7 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
           )}
 
           <div className="flex items-center relative py-1">
-            <button 
+            <button
               type="button"
               onClick={handlePlusClick}
               className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-[#4B5563] hover:text-[#111111] transition-colors z-10"
@@ -100,22 +100,22 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
             >
               <Plus size={22} className={pendingFile ? "text-[#FF6A00]" : ""} />
             </button>
-   
+
             <div className="flex-1 flex items-start pt-3 relative">
-              <textarea 
+              <textarea
                 ref={textareaRef}
                 value={inputValue || ""}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={pendingFile ? "Add a message about this document..." : "Ask DealCollab AI anything..."} 
+                placeholder={pendingFile ? "Add a message about this document..." : "Ask DealCollab AI anything..."}
                 rows={1}
                 autoFocus
                 enterKeyHint="send"
                 className="flex-1 bg-transparent border-none outline-none text-[#111111] font-medium text-[16px] py-1 px-0 pr-4 placeholder:text-[#4B5563]/60 resize-none min-h-[24px] max-h-[200px] scrollbar-hide relative z-20"
                 style={{ height: 'auto' }}
               />
-              
-              <button 
+
+              <button
                 type="submit"
                 disabled={!inputValue.trim() && !pendingFile}
                 className="mr-3 mt-[-2px] w-9 h-9 rounded-xl bg-[#111111] hover:bg-[#FF6A00] text-white flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale active:scale-95 shadow-[0_2px_10px_rgb(0,0,0,0.1)] shrink-0 z-10"
@@ -125,9 +125,9 @@ export default function InputBar({ onSendMessage }: InputBarProps) {
             </div>
           </div>
         </form>
-        
+
         <p className="text-center text-[10px] text-[#4B5563] mt-4 font-bold uppercase tracking-[0.1em] opacity-60">
-          Deal Intelligence Assistant • High Precision Extraction
+          DealCollab AI can make mistakes. Verify important deal and counterparty information before taking action.
         </p>
       </div>
     </div>
