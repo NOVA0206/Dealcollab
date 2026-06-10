@@ -291,70 +291,142 @@ export function updateStateFromExtraction(
 
 export function initializeStateFromDocument(structuredData: Record<string, unknown>): RouterState {
     const state = createBlankState();
-    const intent = structuredData.intent as DealIntent ?? null;
-    const sectorStr = structuredData.sector as string ?? '';
-    const location = structuredData.geography as string ?? structuredData.location as string ?? '';
-
-    if (intent) state.intent = intent;
-    if (sectorStr) {
-        const raw = sectorStr.toLowerCase().trim();
-        const validKey = VALID_SECTOR_KEYS.find(k => k === raw);
-        state.sector = validKey || detectSectorFromText(sectorStr);
-    }
-    if (location) state.geography = location;
-    if (structuredData.sub_sector) state.sub_sector = String(structuredData.sub_sector);
-    if (structuredData.deal_size) state.deal_size = String(structuredData.deal_size);
-    if (structuredData.revenue) state.revenue = String(structuredData.revenue);
-    if (structuredData.structure) state.structure = String(structuredData.structure);
-    if (structuredData.company_overview) {
-        state.industry_data = { ...state.industry_data, company_overview: structuredData.company_overview };
-    }
-
+    
     // Helper utilities
     const _docStr = (v: unknown): string => (typeof v === 'string' ? v : '');
     const _docArr = (v: unknown): string[] =>
         Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
-    // Fallback sector detection from industry field
+    // Normalize intent
+    let intent = (structuredData.intent || structuredData.deal_type) as string ?? null;
+    if (intent) {
+        const norm = intent.toUpperCase().replace(/[-\s]/g, '_');
+        if (['SELL_SIDE', 'BUY_SIDE', 'FUNDRAISING', 'DEBT', 'STRATEGIC_PARTNERSHIP'].includes(norm)) {
+            state.intent = norm as DealIntent;
+        }
+    }
+
+    // Normalize sector
+    const sectorStr = (structuredData.sector || structuredData.industry) as string ?? '';
+    if (sectorStr) {
+        const raw = sectorStr.toLowerCase().trim();
+        const validKey = VALID_SECTOR_KEYS.find(k => k === raw);
+        state.sector = validKey || detectSectorFromText(sectorStr);
+    }
+
+    // Fallback sector detection from industry field if sector is still null
     if (!state.sector && structuredData.industry) {
         state.sector = detectSectorFromText(_docStr(structuredData.industry));
     }
 
-    // Map document intelligence fields into industry_data
-    const docProducts = _docArr(structuredData.products_services);
-    if (docProducts.length > 0)
-        state.industry_data = { ...state.industry_data, products_services: docProducts.slice(0, 6).join(', ') };
+    // Normalize location / geography
+    const location = (structuredData.geography || structuredData.location) as string ?? '';
+    if (location) state.geography = location;
 
-    const docCapabilities = _docArr(structuredData.capabilities);
-    if (docCapabilities.length > 0)
-        state.industry_data = { ...state.industry_data, capabilities: docCapabilities.slice(0, 5).join(', ') };
+    // Normalize subsector / sub_sector
+    const subSector = (structuredData.subsector || structuredData.sub_sector) as string ?? '';
+    if (subSector) state.sub_sector = subSector;
 
-    const docMarketPos = _docStr(structuredData.market_position);
-    if (docMarketPos)
-        state.industry_data = { ...state.industry_data, market_position: docMarketPos.slice(0, 120) };
+    // Normalize deal_size / deal_value
+    const dealSize = (structuredData.deal_value || structuredData.deal_size) as string ?? '';
+    if (dealSize) state.deal_size = dealSize;
 
-    const docCerts = _docArr(structuredData.certifications);
-    if (docCerts.length > 0)
-        state.industry_data = { ...state.industry_data, certifications: docCerts.join(', ') };
+    // Normalize revenue / revenue_range
+    const revenue = (structuredData.revenue || structuredData.revenue_range) as string ?? '';
+    if (revenue) state.revenue = revenue;
 
-    // Map transaction_type → structure
-    if (!state.structure && structuredData.transaction_type) {
+    // Normalize structure / transaction_type
+    if (structuredData.structure) {
+        state.structure = String(structuredData.structure);
+    } else if (structuredData.transaction_type) {
         const txStr = _docStr(structuredData.transaction_type);
         const detectedStruct = detectStructureFromText(txStr);
-        if (detectedStruct) {
-            state.structure = detectedStruct;
-        } else if (txStr) {
-            state.industry_data = { ...state.industry_data, transaction_type: txStr.slice(0, 80) };
-        }
+        state.structure = detectedStruct || txStr;
     }
 
-    const docCompAdv = _docArr(structuredData.competitive_advantages);
-    if (docCompAdv.length > 0)
-        state.industry_data = { ...state.industry_data, competitive_advantages: docCompAdv.slice(0, 4).join(', ') };
+    // Populate company_overview
+    if (structuredData.company_overview) {
+        state.industry_data.company_overview = _docStr(structuredData.company_overview);
+    }
 
+    // Extract core industry intelligence fields
+    const cap = _docStr(structuredData.capacity);
+    const prod = _docStr(structuredData.production);
+    const util = _docStr(structuredData.utilization);
+    const custs = _docArr(structuredData.customers);
+    const certs = _docArr(structuredData.certifications);
+    const assets = _docArr(structuredData.strategic_assets);
+    const ebitda = _docStr(structuredData.ebitda);
+
+    // Save under generic keys
+    if (cap) state.industry_data.capacity = cap;
+    if (prod) state.industry_data.production = prod;
+    if (util) state.industry_data.utilization = util;
+    if (custs.length > 0) state.industry_data.customers = custs.join(', ');
+    if (certs.length > 0) state.industry_data.certifications = certs.join(', ');
+    if (assets.length > 0) state.industry_data.strategic_assets = assets.join(', ');
+    if (ebitda) state.industry_data.ebitda = ebitda;
+
+    // Map doc products and capabilities if present
+    const docProducts = _docArr(structuredData.products_services);
+    if (docProducts.length > 0) {
+        state.industry_data.products_services = docProducts.slice(0, 6).join(', ');
+    }
+    const docCapabilities = _docArr(structuredData.capabilities);
+    if (docCapabilities.length > 0) {
+        state.industry_data.capabilities = docCapabilities.slice(0, 5).join(', ');
+    }
+    const docMarketPos = _docStr(structuredData.market_position);
+    if (docMarketPos) {
+        state.industry_data.market_position = docMarketPos.slice(0, 120);
+    }
+    const docCompAdv = _docArr(structuredData.competitive_advantages);
+    if (docCompAdv.length > 0) {
+        state.industry_data.competitive_advantages = docCompAdv.slice(0, 4).join(', ');
+    }
     const docGrowthDrivers = _docArr(structuredData.growth_drivers);
-    if (docGrowthDrivers.length > 0)
-        state.industry_data = { ...state.industry_data, growth_drivers: docGrowthDrivers.slice(0, 4).join(', ') };
+    if (docGrowthDrivers.length > 0) {
+        state.industry_data.growth_drivers = docGrowthDrivers.slice(0, 4).join(', ');
+    }
+
+    // Map sector-specific M4 keys
+    if (state.sector === 'manufacturing') {
+        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
+        if (certs.length > 0) state.industry_data.certifications = certs.join(', ');
+        
+        let capUtilStr = '';
+        if (cap) capUtilStr += `Capacity: ${cap}`;
+        if (prod) capUtilStr += `${capUtilStr ? ', ' : ''}${prod} production`;
+        if (util) capUtilStr += ` (${util} utilization)`;
+        if (capUtilStr) state.industry_data.capacity_utilisation = capUtilStr;
+
+        if (custs.length > 0) state.industry_data.client_concentration = custs.join(', ');
+    } else if (state.sector === 'renewable') {
+        if (structuredData.asset_type) state.industry_data.asset_type = String(structuredData.asset_type);
+        if (structuredData.operational_status) state.industry_data.operational_status = String(structuredData.operational_status);
+        if (cap) state.industry_data.capacity_mw = cap;
+        if (custs.length > 0) state.industry_data.ppa_off_taker = custs.join(', ');
+    } else if (state.sector === 'pharma') {
+        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
+        if (certs.length > 0) state.industry_data.regulatory_approvals = certs.join(', ');
+        if (cap) state.industry_data.manufacturing_capacity = cap;
+    } else if (state.sector === 'defence') {
+        if (certs.length > 0) state.industry_data.certifications_approvals = certs.join(', ');
+        if (custs.length > 0) state.industry_data.government_oem_exposure = custs.join(', ');
+    } else if (state.sector === 'healthcare') {
+        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
+        if (certs.length > 0) state.industry_data.accreditations = certs.join(', ');
+        if (cap) state.industry_data.scale_indicator = cap;
+    } else if (state.sector === 'saas') {
+        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
+        if (custs.length > 0) state.industry_data.client_profile = custs.join(', ');
+    } else if (state.sector === 'education') {
+        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
+        if (certs.length > 0) state.industry_data.accreditations = certs.join(', ');
+        if (cap) state.industry_data.enrolment_scale = cap;
+    } else if (state.sector === 'logistics') {
+        if (custs.length > 0) state.industry_data.client_concentration = custs.join(', ');
+    }
 
     // Infer ev_charging sub_sector for renewable companies
     if (state.sector === 'renewable' && !state.sub_sector) {
@@ -380,15 +452,30 @@ export function initializeStateFromDocument(structuredData: Record<string, unkno
         }
     }
 
-    state.m4_questions_asked = false;
+    // If document has extracted details, mark document intake mode active!
+    state.is_document_intake = true;
+
+    // Set m4_questions_asked=true if key fields are parsed from the document
+    const m4Keys = ['capacity', 'capacity_utilisation', 'client_concentration', 'certifications', 'regulatory_approvals', 'government_oem_exposure', 'accreditations', 'enrolment_scale'];
+    const hasM4Data = m4Keys.some(key => !!state.industry_data[key]);
+    state.m4_questions_asked = hasM4Data;
+
+    // Compute sufficiency
     const hasIndustrySignal = !!(state.sector || state.sub_sector);
+    const capacitySectors = ['renewable', 'realestate'];
+    const hasCapacitySignal = capacitySectors.includes(state.sector ?? '')
+        ? !!(state.deal_size || state.industry_data?.capacity || state.industry_data?.installed_capacity || state.sub_sector)
+        : !!(state.revenue || state.deal_size);
+
     const qualifyingFields = [
-        !!(state.revenue || state.deal_size),
+        hasCapacitySignal,
         !!(state.structure || state.intent),
         !!(state.geography),
     ].filter(Boolean).length;
+
     state.is_sufficient = hasIndustrySignal && qualifyingFields >= 2 && state.m4_questions_asked;
     state.phase = resolvePhase(state);
+
     return state;
 }
 

@@ -275,11 +275,20 @@ export interface DocumentIntelligence {
   executive_summary?: string;
   deal_type?: string;
   sector?: string;
+  subsector?: string;
   geography?: string;
   ebitda?: string;
+  deal_value?: string;
+  revenue_range?: string;
+  capacity?: string;
+  production?: string;
+  utilization?: string;
+  customers?: string[];
+  strategic_assets?: string[];
   key_risks?: string[];
   key_opportunities?: string[];
   confidence_score?: number;
+  confidence?: Record<string, number>;
 }
 
 // Used when AI structuring fails — never null, never throws.
@@ -301,11 +310,20 @@ const EMPTY_INTEL: Omit<DocumentIntelligence, "missing_information"> = {
   executive_summary: "",
   deal_type: "",
   sector: "",
+  subsector: "",
   geography: "",
   ebitda: "",
+  deal_value: "",
+  revenue_range: "",
+  capacity: "",
+  production: "",
+  utilization: "",
+  customers: [],
+  strategic_assets: [],
   key_risks: [],
   key_opportunities: [],
   confidence_score: 0,
+  confidence: {},
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -335,15 +353,22 @@ GOALS:
 4. ENRICH: Extract or calculate the following key metrics for structured database logging:
    - executive_summary (concise executive-level summary of the deal/company)
    - deal_type (buy-side, sell-side, fundraising, debt, or strategic partnership)
-   - sector (canonical sector classification)
+   - sector (canonical sector classification: pharma, healthcare, manufacturing, saas, finserv, consumer, realestate, logistics, education, chemicals, hospitality, renewable, defence, oil_gas, ngo, mixed)
+   - subsector (specific industry niche or subsector, e.g. "Railway Castings")
    - geography (target geographic location or region)
-   - revenue (extracted financial revenue details, e.g. "₹50 Cr")
+   - revenue (extracted financial annual revenue details, e.g. "₹50 Cr")
    - ebitda (extracted EBITDA details, e.g. "₹8 Cr")
-   - deal_size (extracted deal size/valuation range)
-   - transaction_type (full transaction/structure overview)
+   - deal_value (extracted deal size/valuation range, e.g. "₹100 Cr")
+   - revenue_range (calculated or extracted revenue range)
+   - capacity (installed/manufacturing/operating capacity scale details, e.g. "700 MT")
+   - production (current production or output scale details, e.g. "400 MT")
+   - utilization (capacity utilization percentage, calculated if capacity and production/output are both available, e.g. "57%")
+   - customers (array of key client/customer names mentioned, e.g. ["Railways", "BHEL", "Tata Motors"])
+   - strategic_assets (array of key assets, land, campuses, or operational history, e.g. ["23 acre campus", "70 years operating history"])
    - key_risks (array of identified deal risks)
    - key_opportunities (array of identified growth/strategic opportunities)
-   - confidence_score (numerical value 0-100 indicating extraction confidence)
+   - confidence_score (overall numerical value 0-100 indicating extraction confidence)
+   - confidence (JSON object with individual numerical confidence scores 0-100 for each field: intent, sector, geography, deal_value, revenue, capacity, utilization, customers, certifications, strategic_assets)
 
 Return ONLY this JSON — no markdown, no explanation:
 {
@@ -363,11 +388,31 @@ Return ONLY this JSON — no markdown, no explanation:
   "executive_summary": "...",
   "deal_type": "...",
   "sector": "...",
+  "subsector": "...",
   "geography": "...",
   "ebitda": "...",
+  "deal_value": "...",
+  "revenue_range": "...",
+  "capacity": "...",
+  "production": "...",
+  "utilization": "...",
+  "customers": ["..."],
+  "strategic_assets": ["..."],
   "key_risks": ["..."],
   "key_opportunities": ["..."],
-  "confidence_score": 85
+  "confidence_score": 85,
+  "confidence": {
+    "intent": 90,
+    "sector": 95,
+    "geography": 90,
+    "deal_value": 85,
+    "revenue": 80,
+    "capacity": 95,
+    "utilization": 90,
+    "customers": 90,
+    "certifications": 95,
+    "strategic_assets": 90
+  }
 }
 
 Rules: Do not hallucinate. Missing data → add field name to missing_information.
@@ -438,11 +483,20 @@ Remove redundancy. Preserve technical terms. Tone: investment banker summarising
       executive_summary: str(r.executive_summary),
       deal_type: str(r.deal_type),
       sector: str(r.sector),
+      subsector: str(r.subsector),
       geography: str(r.geography),
       ebitda: str(r.ebitda),
+      deal_value: str(r.deal_value),
+      revenue_range: str(r.revenue_range),
+      capacity: str(r.capacity),
+      production: str(r.production),
+      utilization: str(r.utilization),
+      customers: arr(r.customers),
+      strategic_assets: arr(r.strategic_assets),
       key_risks: arr(r.key_risks),
       key_opportunities: arr(r.key_opportunities),
       confidence_score: num(r.confidence_score),
+      confidence: typeof r.confidence === "object" && r.confidence !== null ? (r.confidence as Record<string, number>) : {},
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
