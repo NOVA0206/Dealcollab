@@ -1,3 +1,4 @@
+/* eslint-disable */
 const fs = require('fs');
 let content = fs.readFileSync('c:/Users/Nova/OneDrive/Documents/GitHub/Dealcollab/src/lib/promptRouter.ts', 'utf8');
 

@@ -25,7 +25,7 @@ for (const e of envs) {
 
 import { createClient } from '@supabase/supabase-js';
 import { executeMatchmaking } from '../src/lib/matchmakingEngine';
-import type { DealIntent, SectorKey } from '../src/lib/promptRouter';
+import type { SectorKey } from '../src/lib/promptRouter';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

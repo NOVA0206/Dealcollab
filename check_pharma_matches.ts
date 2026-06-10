@@ -31,8 +31,8 @@ async function main() {
         console.log(`\nProposal ${p.id} (Sectors: ${p.sectors}):`);
         console.log(`Has ${matches?.length || 0} matches`);
         if (matches && matches.length > 0) {
-             matches.forEach((m: any) => {
-                 console.log(`  -> Matched with ${m.matched_proposal_id} (Sectors: ${m.proposals?.sectors})`);
+             (matches as unknown as Array<{ matched_proposal_id: string; proposals: { sectors: string | string[] | null } | null }>).forEach((m) => {
+                  console.log(`  -> Matched with ${m.matched_proposal_id} (Sectors: ${m.proposals?.sectors})`);
              });
         }
     }

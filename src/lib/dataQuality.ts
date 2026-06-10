@@ -245,6 +245,7 @@ const SECTOR_CONTRADICTIONS: Record<string, RegExp[]> = {
 };
 
 // SaaS-specific legitimacy signals — must mention product/platform/revenue characteristics
+/*
 const SAAS_LEGITIMACY_SIGNALS = [
     /\brecurring revenue\b/i,
     /\barr\b/i,
@@ -256,6 +257,7 @@ const SAAS_LEGITIMACY_SIGNALS = [
     /\b(?:api|sdk|cloud[- ]native|multi[- ]tenant)\b/i,
     /\bproprietary\s+(?:platform|software|technology)\b/i,
 ];
+*/
 
 // Digital marketing / MarTech classification signals
 export const DIGITAL_MARKETING_SIGNALS: RegExp[] = [

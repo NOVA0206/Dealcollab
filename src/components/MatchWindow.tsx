@@ -189,7 +189,7 @@ export default function MatchWindow({ status, matches: propMatches, onViewMatch,
                         {match.counterparty.summary && (
                           <div className="mb-2 p-2 bg-gray-50 border border-gray-100 rounded-lg">
                             <p className="text-[11px] text-gray-700 italic line-clamp-2">
-                              "{match.counterparty.summary}"
+                              &ldquo;{match.counterparty.summary}&rdquo;
                             </p>
                           </div>
                         )}

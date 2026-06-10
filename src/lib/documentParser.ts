@@ -1,186 +1,244 @@
 import mammoth from 'mammoth';
 
 /**
- * 🛠️ ROBUST DOCUMENT PARSING SYSTEM (v2.0)
- * Hybrid pipeline: pdf-parse -> OCR fallback (tesseract.js)
+ * Vercel-Safe Document Parser v3.0
+ *
+ * PDF extraction uses pdfjs-dist/legacy directly — no canvas, no native binaries.
+ * pdf-parse v2.x is NOT used (requires @napi-rs/canvas, which is missing on Vercel).
+ * OCR via pdf2pic/Ghostscript is NOT used (system binaries unavailable on Vercel).
+ * Scanned PDFs receive a structured warning instead of a 4-minute timeout.
  */
 
+// ─── DOM Polyfills ────────────────────────────────────────────────────────────
+// pdfjs-dist checks these globals during initialisation.
+// They are only needed as stubs — text extraction never invokes canvas rendering.
+function installPDFJSPolyfills(): void {
+  if (typeof globalThis.DOMMatrix === 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).DOMMatrix = class DOMMatrix {
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      static fromMatrix() { return new (globalThis as any).DOMMatrix(); }
+      multiply() { return this; }
+      inverse() { return this; }
+      translate() { return this; }
+      scale() { return this; }
+      rotate() { return this; }
+    };
+  }
+  if (typeof globalThis.Path2D === 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).Path2D = class Path2D {
+      addPath() {} arc() {} arcTo() {} bezierCurveTo() {} closePath() {}
+      ellipse() {} lineTo() {} moveTo() {} quadraticCurveTo() {} rect() {}
+    };
+  }
+  if (typeof globalThis.ImageData === 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).ImageData = class ImageData {
+      data: Uint8ClampedArray;
+      width: number;
+      height: number;
+      colorSpace = 'srgb';
+      constructor(w: number | Uint8ClampedArray, h?: number) {
+        if (typeof w === 'number') {
+          this.width = w; this.height = h ?? 0;
+          this.data = new Uint8ClampedArray(w * (h ?? 0) * 4);
+        } else {
+          this.data = w; this.width = h ?? 0;
+          this.height = this.data.length / (this.width * 4);
+        }
+      }
+    };
+  }
+}
 
-
-/**
- * Clean and normalize extracted text
- */
+// ─── Text normalisation ───────────────────────────────────────────────────────
 function cleanText(text: string): string {
-  if (!text) return "";
-  
+  if (!text) return '';
   return text
-    .replace(/[^\x20-\x7E\n\r\t]/g, "") // Remove non-ASCII garbage
-    .replace(/\s+/g, " ")               // Normalize whitespace
-    .replace(/\n\s*\n/g, "\n\n")        // Keep meaningful line breaks
+    .replace(/[^\x20-\x7E\n\r\t]/g, '')  // strip non-ASCII garbage / mojibake
+    .replace(/[ \t]+/g, ' ')              // collapse horizontal whitespace
+    .replace(/\n{3,}/g, '\n\n')           // collapse excessive blank lines
     .trim();
 }
 
-/**
- * Fallback OCR logic for scanned PDFs
- */
-async function performOCR(buffer: Buffer): Promise<string> {
-  console.log("[OCR] Starting extraction for scanned document...");
-  
-  return Promise.race([
-    (async () => {
-      const MAX_PAGES = 3; 
-      let combinedText = "";
-      
-      try {
-        const { createWorker } = await import('tesseract.js');
-        const worker = await createWorker('eng');
-        
-        // Note: In a production environment without GraphicsMagick/Ghostscript,
-        // this pdf2pic conversion WILL fail or hang. 
-        try {
-          const pdf2pic = await import('pdf2pic');
-          const options = {
-            density: 100,
-            saveFilename: "page",
-            savePath: "/tmp",
-            format: "png",
-            width: 800,
-            height: 1100
-          };
-          const convert = pdf2pic.fromBuffer(buffer, options);
+// ─── PDF text extraction (pdfjs-dist/legacy, no canvas) ──────────────────────
+// Cached worker URL so we resolve it only once per process lifetime.
+let _pdfjsWorkerSrc: string | undefined;
 
-          let i = 1;
-          while (true) {
-            try {
-              const page = await convert(i, true);
-              if (page && 'base64' in page && page.base64) {
-                const { data: { text } } = await worker.recognize(`data:image/png;base64,${page.base64}`);
-                combinedText += `\n--- Page ${i} ---\n${text}`;
-                i++;
-              } else {
-                break; // No more pages returned
-              }
-            } catch (pageErr) {
-              console.log(`[OCR] Finished processing all ${i - 1} pages.`);
-              break;
-            }
-          }
-        } catch (pdfErr) {
-          console.warn("[OCR] pdf2pic failed, usually means GraphicsMagick/Ghostscript is missing on Vercel.");
-          combinedText = "[OCR Error] Dependencies missing for scanned document parsing. Please upload a text-based PDF.";
-        }
-        
-        await worker.terminate();
-        return combinedText.trim() || "[OCR Error] No text extracted.";
-      } catch (err) {
-        console.error("[OCR] Full OCR process failed:", err);
-        return "[OCR Critical Failure] Could not process document images.";
-      }
-    })(),
-    new Promise<string>((_, reject) => 
-      setTimeout(() => reject(new Error("OCR timed out because Ghostscript is not available on Vercel or the document is too large.")), 240000)
-    ).catch(e => {
-       console.error(e.message);
-       return "[OCR Timeout] Document was too large or OCR engine stalled. Please try a text-based PDF.";
-    })
-  ]);
+async function resolvePDFJSWorker(): Promise<string> {
+  if (_pdfjsWorkerSrc !== undefined) return _pdfjsWorkerSrc;
+
+  try {
+    // import.meta.resolve is available in Node.js 18.19+ / 20+ (Vercel default).
+    // It returns a file:// URL directly — the safest approach in ESM context.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const metaResolve = (import.meta as any).resolve as ((s: string) => string | Promise<string>) | undefined;
+    if (typeof metaResolve === 'function') {
+      const resolved = metaResolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+      _pdfjsWorkerSrc = resolved instanceof Promise ? await resolved : resolved;
+      return _pdfjsWorkerSrc;
+    }
+  } catch {
+    // fall through to next strategy
+  }
+
+  try {
+    // Fallback: createRequire + pathToFileURL (works in CJS-compiled Next.js output)
+    const { createRequire } = await import('module');
+    const { pathToFileURL } = await import('url');
+    const baseUrl = typeof import.meta !== 'undefined' && import.meta.url
+      ? import.meta.url
+      : 'file:///';
+    const req = createRequire(baseUrl);
+    const workerPath = req.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    _pdfjsWorkerSrc = pathToFileURL(workerPath).href;
+    return _pdfjsWorkerSrc;
+  } catch {
+    // fall through to empty string (pdfjs will warn but still work for text extraction)
+  }
+
+  _pdfjsWorkerSrc = '';
+  return _pdfjsWorkerSrc;
 }
 
+async function extractPDFWithPDFJS(buffer: Buffer): Promise<string> {
+  const t0 = Date.now();
+  installPDFJSPolyfills();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+
+  const workerSrc = await resolvePDFJSWorker();
+  if (pdfjs.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
+    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+  }
+
+  const uint8Array = new Uint8Array(buffer);
+  const loadingTask = pdfjs.getDocument({
+    data: uint8Array,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    disableFontFace: true,
+  });
+
+  const pdfDoc = await loadingTask.promise;
+  const numPages: number = pdfDoc.numPages;
+  const MAX_PAGES = 50;
+  const pagesToProcess = Math.min(numPages, MAX_PAGES);
+
+  console.log(`[PDF] Loaded: ${numPages} pages | processing: ${pagesToProcess} | size: ${(buffer.length / 1024).toFixed(1)}KB`);
+
+  let fullText = '';
+  for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pageText = (content.items as any[])
+      .map((item: { str?: string }) => item.str ?? '')
+      .join(' ');
+    fullText += pageText + '\n';
+    page.cleanup();
+  }
+
+  const elapsed = Date.now() - t0;
+  const cleaned = cleanText(fullText);
+  console.log(`[PDF] Extracted ${cleaned.length} chars in ${elapsed}ms`);
+  return cleaned;
+}
+
+// ─── DOCX extraction ──────────────────────────────────────────────────────────
 export async function extractDocxText(fileBuffer: Buffer): Promise<string> {
   try {
     const result = await mammoth.extractRawText({ buffer: fileBuffer });
     return cleanText(result.value);
   } catch (err) {
-    console.error("[DOCX] Extraction failed:", err);
-    return "";
+    console.error('[DOCX] Extraction failed:', err);
+    return '';
   }
 }
 
+// ─── Main entry point ─────────────────────────────────────────────────────────
 export async function extractTextFromFile(
   buffer: Buffer,
-  mimeType: string
+  mimeType: string,
 ): Promise<string> {
-  console.log(`[PARSER] Received ${mimeType} (${buffer.length} bytes)`);
-
-  let extractedText = "";
+  const t0 = Date.now();
+  console.log(`[PARSER] Received ${mimeType} | size: ${(buffer.length / 1024).toFixed(1)}KB`);
 
   try {
-    // 1. DOCX Handling
+    // ── DOCX / DOC ────────────────────────────────────────────────────────────
     if (
       mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       mimeType === 'application/msword'
     ) {
-      extractedText = await extractDocxText(buffer);
+      const text = await extractDocxText(buffer);
+      console.log(`[EXTRACT] DOCX: ${text.length} chars in ${Date.now() - t0}ms`);
+      return text || 'Document content could not be extracted from DOCX.';
     }
 
-    // 2. Plain Text Handling
-    else if (mimeType === 'text/plain') {
-      extractedText = buffer.toString('utf-8');
+    // ── Plain text ────────────────────────────────────────────────────────────
+    if (mimeType === 'text/plain') {
+      const text = cleanText(buffer.toString('utf-8'));
+      console.log(`[EXTRACT] TXT: ${text.length} chars`);
+      return text || 'Empty text file.';
     }
 
-    // 3. PDF Handling (Main Logic)
-    else if (mimeType === 'application/pdf') {
+    // ── PDF ───────────────────────────────────────────────────────────────────
+    if (mimeType === 'application/pdf') {
+      let text = '';
+
+      // Step A: text extraction via pdfjs-dist/legacy — 30s hard limit
       try {
-        // Step A: Fast extraction
-        const pdfParseModule = (await import('pdf-parse')) as any;
-        const PDFParse = pdfParseModule.PDFParse || pdfParseModule.default;
-        
-        let extractedTextFromPdf = '';
-        if (PDFParse) {
-          const parser = new PDFParse({ data: buffer });
-          try {
-            const data = await parser.getText();
-            extractedTextFromPdf = data.text.trim();
-          } finally {
-            await parser.destroy();
-          }
-        } else {
-          // Fallback if the package exports a function directly (like standard pdf-parse)
-          const data = await pdfParseModule(buffer);
-          extractedTextFromPdf = data.text.trim();
-        }
-        
-        extractedText = extractedTextFromPdf;
-        
-        console.log(`[PDF] Raw extraction length: ${extractedText.length}`);
-
-        // Step B: Sufficiency Check (Threshold: 150 chars)
-        if (extractedText.length < 150) {
-          console.log("[PDF] Low text density detected. Attempting OCR fallback...");
-          
-          const ocrText = await performOCR(buffer);
-          
-          if (ocrText.length > 50) {
-            extractedText = "NOTE: I’m processing this document using enhanced extraction as it appears to be scanned.\n\n" + ocrText;
-          }
-        }
+        text = await Promise.race<string>([
+          extractPDFWithPDFJS(buffer),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error('PDF extraction timed out after 30s')),
+              30_000,
+            ),
+          ),
+        ]);
       } catch (pdfErr) {
-        console.warn("[PDF] Standard extraction failed, trying OCR...", pdfErr);
-        extractedText = await performOCR(buffer);
+        const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
+        console.warn('[PDF] pdfjs-dist extraction failed:', msg);
+
+        if (msg.includes('timed out')) {
+          return JSON.stringify({
+            status: 'timeout',
+            reason: 'PDF extraction exceeded 30s limit.',
+            recommendation: 'Upload a smaller or text-based PDF, or paste deal details directly into the chat.',
+          });
+        }
+        text = '';
       }
+
+      // Step B: scanned-PDF detection (< 150 meaningful chars = likely image-only)
+      if (text.length < 150) {
+        console.log(`[PDF] Low text density (${text.length} chars) — document may be scanned.`);
+        console.log('[OCR] Skipping: Ghostscript/GraphicsMagick unavailable on Vercel serverless.');
+
+        const warning =
+          'SCANNED_PDF_DETECTED: This document appears to be image-based (scanned). ' +
+          'Text extraction returned fewer than 150 characters. ' +
+          'Please upload a text-based PDF (digitally created, not scanned) for full analysis. ' +
+          'Alternatively, paste the deal details directly into the chat.';
+
+        console.log(`[EXTRACT] Returning scanned-PDF warning. Partial text: ${text.length} chars.`);
+        return text.length > 20 ? `${text}\n\n${warning}` : warning;
+      }
+
+      console.log(`[EXTRACT] PDF: ${text.length} chars in ${Date.now() - t0}ms`);
+      return text;
     }
 
-    // 4. Unsupported Handling
-    else {
-      console.warn(`[PARSER] Unsupported MIME type: ${mimeType}`);
-      extractedText = `[Unsupported File Type: ${mimeType}]`;
-    }
-
-    // Final Clean
-    const finalResult = cleanText(extractedText);
-    
-    // Safety Guarantee: Never return empty/null if possible
-    if (!finalResult || finalResult.length < 5) {
-      return "Document content could not be fully extracted. It may be an empty file or protected.";
-    }
-
-    console.log(`[PARSER] Final extraction length: ${finalResult.length} chars`);
-    console.log(`[PARSER] Preview: ${finalResult.slice(0, 100)}...`);
-    
-    return finalResult;
+    // ── Unsupported ───────────────────────────────────────────────────────────
+    console.warn(`[PARSER] Unsupported MIME type: ${mimeType}`);
+    return `[Unsupported File Type: ${mimeType}]`;
 
   } catch (globalErr) {
-    console.error("[PARSER] Fatal error:", globalErr);
-    return "An error occurred while parsing the document. Please ensure the file is not password-protected.";
+    console.error('[PARSER] Fatal error:', globalErr);
+    return 'An error occurred while parsing the document. Please ensure the file is not password-protected.';
   }
 }

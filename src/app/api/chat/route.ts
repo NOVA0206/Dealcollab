@@ -1,11 +1,6 @@
 // src/app/api/chat/route.ts
 import { auth } from '@/auth';
-import {
-  computeQualityScore,
-  normalizeIntent,
-  normalizeSize,
-  qualityTierFromScore,
-} from '@/lib/dataQuality';
+
 import { processIntelligence } from '@/lib/intelligenceEngine';
 import { normalizeMessage } from '@/lib/normalizeMessage';
 import {
@@ -29,8 +24,8 @@ import {
 } from '@/lib/promptRouter';
 import { buildFinalMessage } from '@/lib/responseBuilder';
 import { createServerSupabaseClient } from '@/utils/supabase/server';
-import { NextRequest, NextResponse, after } from 'next/server';
-import { executeMatchmaking, type ProposalInput, type MatchCard, type MatchmakingResult } from '@/lib/matchmakingEngine';
+import { NextRequest, NextResponse } from 'next/server';
+import { type MatchCard, type MatchmakingResult } from '@/lib/matchmakingEngine';
 import crypto from 'crypto';
 
 /**

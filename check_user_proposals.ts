@@ -14,7 +14,7 @@ async function main() {
     
     console.log("User:", dbUser);
 
-    const { data: proposals, error } = await supabase
+    const { data: proposals } = await supabase
         .from('proposals')
         .select('id, intent, sectors, status')
         .eq('user_id', dbUser?.id);

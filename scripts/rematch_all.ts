@@ -52,8 +52,9 @@ async function main() {
                 revenue_max: p.revenue_max_cr?.toString() ?? null,
             });
             console.log(`✅ Success for ${p.id}`);
-        } catch(e: any) {
-            console.error(`❌ Failed for ${p.id}: ${e.message}`);
+        } catch(e) {
+            const err = e instanceof Error ? e : new Error(String(e));
+            console.error(`❌ Failed for ${p.id}: ${err.message}`);
         }
     }
 }
