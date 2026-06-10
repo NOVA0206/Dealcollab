@@ -15,10 +15,18 @@ const SUPPORTED_TYPES: Record<string, string> = {
   'application/pdf': 'pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
   'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-excel': 'xls',
+  'text/csv': 'csv',
   'text/plain': 'txt',
+  'application/rtf': 'rtf',
   'image/png': 'png',
   'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
   'image/webp': 'webp',
+  'image/tiff': 'tiff',
 };
 
 export async function POST(req: NextRequest) {
@@ -105,7 +113,7 @@ export async function POST(req: NextRequest) {
     if (!SUPPORTED_TYPES[mimeType]) {
       return NextResponse.json(
         {
-          error: `Unsupported file type: ${mimeType || 'unknown'}. Supported types: PDF, DOCX, PPTX, TXT, JPG, PNG, WEBP.`,
+          error: `Unsupported file type: ${mimeType || 'unknown'}. Supported types: PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, CSV, TXT, RTF, PNG, JPG, WEBP, TIFF.`,
         },
         { status: 400 }
       );
@@ -166,7 +174,7 @@ export async function POST(req: NextRequest) {
     let extractedText = '';
     try {
       extractedText = await Promise.race([
-        extractTextFromFile(buffer, mimeType),
+        extractTextFromFile(buffer, mimeType, file?.name),
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error("Document parsing timed out. Please try a smaller or text-based document.")), 285000))
       ]);
     } catch (parseErr) {

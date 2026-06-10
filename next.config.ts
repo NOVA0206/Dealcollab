@@ -26,7 +26,10 @@ const nextConfig: NextConfig = {
   },
   // Setting the tracing root can help avoid scanning outside the project
   outputFileTracingRoot: process.cwd(),
-  serverExternalPackages: ['pdf-parse', 'pdfjs-dist'],
+  serverExternalPackages: ['pdfjs-dist', 'officeparser', 'mammoth'],
+  outputFileTracingIncludes: {
+    '/api/chat/parse-document': ['./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'],
+  },
 };
 
 export default nextConfig;

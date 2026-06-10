@@ -270,6 +270,16 @@ export interface DocumentIntelligence {
   certifications: string[];
   growth_drivers: string[];
   missing_information: string[];
+  
+  // Phase 11 structured data
+  executive_summary?: string;
+  deal_type?: string;
+  sector?: string;
+  geography?: string;
+  ebitda?: string;
+  key_risks?: string[];
+  key_opportunities?: string[];
+  confidence_score?: number;
 }
 
 // Used when AI structuring fails — never null, never throws.
@@ -288,6 +298,14 @@ const EMPTY_INTEL: Omit<DocumentIntelligence, "missing_information"> = {
   competitive_advantages: [],
   certifications: [],
   growth_drivers: [],
+  executive_summary: "",
+  deal_type: "",
+  sector: "",
+  geography: "",
+  ebitda: "",
+  key_risks: [],
+  key_opportunities: [],
+  confidence_score: 0,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -307,13 +325,25 @@ export async function cleanAndStructureDocument(
   rawText: string,
 ): Promise<DocumentIntelligence> {
   const SYSTEM_PROMPT = `You are an expert document intelligence engine for M&A (Mergers & Acquisitions).
-Process raw PDF-extracted text into clean, structured, high-quality information.
+Process raw extracted text into clean, structured, high-quality information.
 
 GOALS:
 1. CLEAN: Remove noise, duplicate headers/footers, OCR artifacts.
 2. STRUCTURE: Rebuild logical business sections.
 3. EXTRACT: company overview, industry, location, transaction type, products/services,
    capabilities, market position, competitive advantages, certifications, growth drivers.
+4. ENRICH: Extract or calculate the following key metrics for structured database logging:
+   - executive_summary (concise executive-level summary of the deal/company)
+   - deal_type (buy-side, sell-side, fundraising, debt, or strategic partnership)
+   - sector (canonical sector classification)
+   - geography (target geographic location or region)
+   - revenue (extracted financial revenue details, e.g. "₹50 Cr")
+   - ebitda (extracted EBITDA details, e.g. "₹8 Cr")
+   - deal_size (extracted deal size/valuation range)
+   - transaction_type (full transaction/structure overview)
+   - key_risks (array of identified deal risks)
+   - key_opportunities (array of identified growth/strategic opportunities)
+   - confidence_score (numerical value 0-100 indicating extraction confidence)
 
 Return ONLY this JSON — no markdown, no explanation:
 {
@@ -329,7 +359,15 @@ Return ONLY this JSON — no markdown, no explanation:
   "competitive_advantages": ["..."],
   "certifications": ["..."],
   "growth_drivers": ["..."],
-  "missing_information": ["..."]
+  "missing_information": ["..."],
+  "executive_summary": "...",
+  "deal_type": "...",
+  "sector": "...",
+  "geography": "...",
+  "ebitda": "...",
+  "key_risks": ["..."],
+  "key_opportunities": ["..."],
+  "confidence_score": 85
 }
 
 Rules: Do not hallucinate. Missing data → add field name to missing_information.
@@ -381,6 +419,8 @@ Remove redundancy. Preserve technical terms. Tone: investment banker summarising
     const arr = (v: unknown): string[] =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
+    const num = (v: unknown): number => (typeof v === "number" ? v : parseInt(String(v)) || 0);
+
     return {
       company_overview: str(r.company_overview),
       industry: str(r.industry),
@@ -395,6 +435,14 @@ Remove redundancy. Preserve technical terms. Tone: investment banker summarising
       certifications: arr(r.certifications),
       growth_drivers: arr(r.growth_drivers),
       missing_information: arr(r.missing_information),
+      executive_summary: str(r.executive_summary),
+      deal_type: str(r.deal_type),
+      sector: str(r.sector),
+      geography: str(r.geography),
+      ebitda: str(r.ebitda),
+      key_risks: arr(r.key_risks),
+      key_opportunities: arr(r.key_opportunities),
+      confidence_score: num(r.confidence_score),
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
