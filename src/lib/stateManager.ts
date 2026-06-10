@@ -298,7 +298,7 @@ export function initializeStateFromDocument(structuredData: Record<string, unkno
         Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
     // Normalize intent
-    let intent = (structuredData.intent || structuredData.deal_type) as string ?? null;
+    const intent = (structuredData.intent || structuredData.deal_type) as string ?? null;
     if (intent) {
         const norm = intent.toUpperCase().replace(/[-\s]/g, '_');
         if (['SELL_SIDE', 'BUY_SIDE', 'FUNDRAISING', 'DEBT', 'STRATEGIC_PARTNERSHIP'].includes(norm)) {

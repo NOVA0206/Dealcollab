@@ -107,7 +107,7 @@ async function main() {
 
   // 3. Initialize state from structured document
   console.log(`[TEST] Populating State Manager...`);
-  const state = initializeStateFromDocument(structured);
+  const state = initializeStateFromDocument(structured as unknown as Record<string, unknown>);
   console.log(`[TEST] Initialized Router State:`);
   console.log(JSON.stringify({
     intent: state.intent,
