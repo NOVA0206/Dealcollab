@@ -3,7 +3,7 @@
  * Defines the structured data extracted during the Deal Intelligence flow.
  */
 
-export interface ConversationState {
+export interface ExtractedDealState {
   sector?: string | null;
   sub_sector?: string | null;
   geography?: string | null;
@@ -24,12 +24,12 @@ export interface ConversationState {
 
 export interface IntelligenceState {
   intent: "SELL_SIDE" | "BUY_SIDE" | "FUNDRAISING" | "DEBT" | "STRATEGIC_PARTNERSHIP" | null;
-  state: ConversationState;
+  state: ExtractedDealState;
   is_complete: boolean;
   message: string;
 }
 
-export const INITIAL_STATE: ConversationState = {
+export const INITIAL_STATE: ExtractedDealState = {
   sector: null,
   sub_sector: null,
   geography: null,

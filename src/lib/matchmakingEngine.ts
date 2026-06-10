@@ -593,6 +593,7 @@ export async function executeMatchmaking(
   input: ProposalInput,
 ): Promise<MatchmakingResult | null> {
 
+  console.log("[MATCHING] Triggering matching");
   console.log('[M5] ====== MATCHMAKING ENGINE STARTED ======');
   console.log(`[M5] intent: ${input.intent} | sector: ${input.sector} | geo: ${input.geography}`);
 
@@ -687,6 +688,7 @@ export async function executeMatchmaking(
     //   exclude_shells removed (not in SQL; shell filtering is HR-7 in TypeScript)
     const targetIntents = COUNTERPARTY_INTENTS[input.intent] ?? [input.intent];
     console.log('[M5] Target counterparty intents:', targetIntents);
+    console.log("[MATCHMAKING] Search started");
     const { data: rawCandidates, error: searchErr } = await supabase.rpc('match_proposals', {
       query_embedding: searchEmbedding,
       match_intents: targetIntents,
@@ -702,6 +704,7 @@ export async function executeMatchmaking(
     }
 
     const candidates = (rawCandidates ?? []) as Candidate[];
+    console.log("[MATCHMAKING] Candidates found");
     console.log('[M5] Candidates from pgvector:', candidates.length);
 
     if (candidates.length === 0) {
@@ -789,6 +792,8 @@ export async function executeMatchmaking(
     });
 
     const topScore = topRows[0]?.final_score ?? 0;
+    console.log("[MATCHING] Matches found");
+    console.log("[MATCHMAKING] Finished");
     console.log(`[M5] ====== COMPLETE: ${topRows.length} matches, top score ${topScore} ======`);
 
     return {

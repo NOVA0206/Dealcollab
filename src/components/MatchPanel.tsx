@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useChat } from '@/components/ChatProvider';
+import { ConversationState } from '@/lib/types';
 
 interface Match {
     rank: string;            // P1, P2, P3
@@ -40,6 +42,7 @@ interface MatchesResponse {
 type View = 'list' | 'detail' | 'connected';
 
 export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; onStartOver: () => void }) {
+    const { setConversationState } = useChat();
     const [data, setData] = useState<MatchesResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [view, setView] = useState<View>('list');
@@ -47,6 +50,16 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
     const [connecting, setConnecting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [pollsCount, setPollsCount] = useState(0);
+
+    useEffect(() => {
+        if (data) {
+            if (data.matches && data.matches.length > 0) {
+                console.log("[MATCHMAKING] Rendering results");
+                console.log("[UI] Rendering matches");
+            }
+            setConversationState(ConversationState.COMPLETE);
+        }
+    }, [data, setConversationState]);
 
     const fetchMatches = useCallback(async () => {
         setLoading(true);

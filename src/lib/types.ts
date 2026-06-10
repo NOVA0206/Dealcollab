@@ -49,6 +49,17 @@ export type ConversationPhase =
   | 'INTENT_VALIDATION';  // NM7: awaiting genuine-mandate confirmation
 
 // ─────────────────────────────────────────────────────────────
+// CONVERSATION STATE (HARD TERMINAL FLOW STATE)
+// ─────────────────────────────────────────────────────────────
+
+export enum ConversationState {
+  COLLECTING = 'COLLECTING',
+  QUALIFYING = 'QUALIFYING',
+  MATCHING = 'MATCHING',
+  COMPLETE = 'COMPLETE'
+}
+
+// ─────────────────────────────────────────────────────────────
 // ROUTER STATE
 // Single source of truth for conversation state, persisted per session.
 // ─────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
+import { ConversationState } from '@/lib/types';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -40,6 +41,8 @@ interface ChatContextType {
   // Bug Fix 2: proposal ID for the active chat (set from completed session or live completion)
   activeProposalId: string | null;
   setActiveProposalId: (id: string | null) => void;
+  conversationState: ConversationState;
+  setConversationState: (state: ConversationState) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -54,6 +57,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
   const [documentText, setDocumentText] = useState<string | null>(null);
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
+  const [conversationState, setConversationState] = useState<ConversationState>(ConversationState.COLLECTING);
 
   // Race-condition guard: each loadChat call gets a unique ID; stale async
   // responses check this ref before committing any state updates.
@@ -144,6 +148,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       console.log(`[ChatProvider] loadChat proposalId restored: ${restoredProposalId} for chatId=${id}`);
       setActiveProposalId(restoredProposalId);
+
+      const hasCompleteMsg = chatDetails.messages?.some((m: Message) => m.role === 'assistant' && (m.type === 'complete' || m.content?.includes("structured successfully")));
+      const isCompleteFromState = chatDetails.state?.is_complete === true;
+      if (restoredProposalId || hasCompleteMsg || isCompleteFromState) {
+        setConversationState(ConversationState.COMPLETE);
+      } else if (chatDetails.messages?.length > 1) {
+        setConversationState(ConversationState.QUALIFYING);
+      } else {
+        setConversationState(ConversationState.COLLECTING);
+      }
     } catch (err) {
       console.error('Failed to load chat:', err);
     } finally {
@@ -214,6 +228,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setDocumentUrl(null);
     setDocumentText(null);
     setActiveProposalId(null);
+    setConversationState(ConversationState.COLLECTING);
   };
 
   const deleteChat = async (id: string) => {
@@ -250,6 +265,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setDocumentText,
       activeProposalId,
       setActiveProposalId,
+      conversationState,
+      setConversationState,
     }}>
       {children}
     </ChatContext.Provider>

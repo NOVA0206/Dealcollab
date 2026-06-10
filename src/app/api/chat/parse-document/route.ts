@@ -7,8 +7,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Allow up to 5 minutes (300 seconds) for processing
 
-// Maximum file size: 10MB
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+// Maximum file size: 50MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 // Supported MIME types
 const SUPPORTED_TYPES: Record<string, string> = {

@@ -1,11 +1,11 @@
-import { ConversationState } from "./conversationState";
+import { ExtractedDealState } from "./conversationState";
 
 /**
  * 🧠 CONTROL LAYER (v1.0)
  * Sits before and after core AI logic to enforce non-repetition and priority questioning.
  */
 
-export function getMissingFields(state: ConversationState): string[] {
+export function getMissingFields(state: ExtractedDealState): string[] {
   // STEP 1 & 2: DEFINE STATE & HARD ELIMINATION
   const allFields = [
     'structure',            // maps to deal_structure
@@ -19,7 +19,7 @@ export function getMissingFields(state: ConversationState): string[] {
   ];
 
   const filtered = allFields.filter(f => {
-    const val = state[f as keyof ConversationState];
+    const val = state[f as keyof ExtractedDealState];
     return !val || (typeof val === 'string' && val.length === 0);
   });
 
@@ -27,7 +27,7 @@ export function getMissingFields(state: ConversationState): string[] {
   return filtered.slice(0, 3);
 }
 
-export function generateControlPrompt(state: ConversationState): string {
+export function generateControlPrompt(state: ExtractedDealState): string {
   const presentFields = Object.entries(state)
     .filter(([, v]) => v !== null && v !== "" && (typeof v !== 'object' || Object.keys(v).length > 0))
     .map(([k]) => k);
@@ -43,7 +43,7 @@ DATA ELIMINATION RULES
 `;
 }
 
-export function validateResponse(response: string, state: ConversationState): { isValid: boolean; reason?: string } {
+export function validateResponse(response: string, state: ExtractedDealState): { isValid: boolean; reason?: string } {
   const lowerResponse = response.toLowerCase();
   const presentFields = Object.entries(state)
     .filter(([, v]) => v !== null && v !== "" && (typeof v !== 'object' || Object.keys(v).length > 0))
@@ -65,7 +65,7 @@ export function validateResponse(response: string, state: ConversationState): { 
   return { isValid: true };
 }
 
-export function parseDealDocument(text: string): Partial<ConversationState> {
+export function parseDealDocument(text: string): Partial<ExtractedDealState> {
   const lowerText = text.toLowerCase();
   
   const extractIntent = (t: string) => {
@@ -114,17 +114,17 @@ export function parseDealDocument(text: string): Partial<ConversationState> {
   };
 }
 
-export function mergeWithPriority(existing: ConversationState, detected: Partial<ConversationState>, priority: 'user' | 'document' = 'document'): ConversationState {
+export function mergeWithPriority(existing: ExtractedDealState, detected: Partial<ExtractedDealState>, priority: 'user' | 'document' = 'document'): ExtractedDealState {
   const newState = { ...existing };
   for (const [key, value] of Object.entries(detected)) {
     if (key.startsWith('_')) continue;
     
-    const isEmpty = !newState[key as keyof ConversationState] || (typeof newState[key as keyof ConversationState] === 'string' && (newState[key as keyof ConversationState] as string).length === 0);
+    const isEmpty = !newState[key as keyof ExtractedDealState] || (typeof newState[key as keyof ExtractedDealState] === 'string' && (newState[key as keyof ExtractedDealState] as string).length === 0);
     
     if (priority === 'user' || isEmpty) {
       if (value !== null && value !== undefined) {
         // @ts-expect-error - dynamic key
-        newState[key as keyof ConversationState] = value;
+        newState[key as keyof ExtractedDealState] = value;
       }
     }
   }

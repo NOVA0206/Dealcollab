@@ -7,6 +7,7 @@ import { Plus } from 'lucide-react';
 import { useChat } from '@/components/ChatProvider';
 import { useRouter } from 'next/navigation';
 import { MatchPanel } from '@/components/MatchPanel';
+import { ConversationState } from '@/lib/types';
 
 export default function Home() {
   const {
@@ -19,6 +20,8 @@ export default function Home() {
     documentId,
     activeProposalId,
     setActiveProposalId,
+    conversationState,
+    setConversationState,
   } = useChat();
 
   const [isTyping, setIsTyping] = React.useState(false);
@@ -35,6 +38,10 @@ export default function Home() {
 
   const handleSendMessage = async (text: string, file?: File | null) => {
     if (!text.trim() && !file) return;
+
+    if (conversationState === ConversationState.COLLECTING) {
+      setConversationState(ConversationState.QUALIFYING);
+    }
 
     // Build the display message for the user bubble
     // If file only (no text), show a placeholder so the bubble is not empty
@@ -193,6 +200,7 @@ export default function Home() {
 
       // Track completion for MatchPanel
       if (chatData.is_complete && chatData.proposalId) {
+        setConversationState(ConversationState.MATCHING);
         setActiveProposalId(chatData.proposalId);
 
         // Persist chatId → proposalId so loadChat can restore MatchPanel after refresh
@@ -272,6 +280,7 @@ export default function Home() {
                     messages={messages} 
                     isTyping={isTyping}
                     onQuestionClick={(q) => handleSendMessage(q, null)}
+                    disableQuestions={conversationState === ConversationState.MATCHING || conversationState === ConversationState.COMPLETE}
                 />
                 {/* Matchmaking Results Panel */}
                 {activeProposalId && (
@@ -293,9 +302,11 @@ export default function Home() {
       </div>
       
       {/* Fixed Sticky Input Bar */}
-      <div className="sticky bottom-0 left-0 w-full z-40">
-        <InputBar onSendMessage={handleSendMessage} />
-      </div>
+      {conversationState !== ConversationState.MATCHING && (
+        <div className="sticky bottom-0 left-0 w-full z-40">
+          <InputBar onSendMessage={handleSendMessage} />
+        </div>
+      )}
     </div>
   );
 }

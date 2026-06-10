@@ -221,6 +221,85 @@ export async function POST(req: NextRequest) {
         console.log(
           `[STATE] Phase: ${storedState.phase} | turn: ${storedState.turn_count} | intermediary: ${storedState.is_intermediary} | sub_sector: ${storedState.sub_sector}`,
         );
+
+        if (storedState.is_complete) {
+          console.log("[STATE] Chat session is already COMPLETE. Skipping processing.");
+          
+          let matchCards: MatchCard[] = [];
+          let matchSummary: string | null = null;
+          const resolvedProposalId: string | null = storedState.proposal_id || null;
+          
+          if (resolvedProposalId) {
+            const { data: dbMatches } = await supabase
+              .from('proposal_matches')
+              .select('*')
+              .eq('proposal_id', resolvedProposalId)
+              .order('final_score', { ascending: false });
+            
+            if (dbMatches && dbMatches.length > 0) {
+              const matchedIds = dbMatches.map(m => m.matched_proposal_id);
+              const { data: candidates } = await supabase
+                .from('proposals')
+                .select('id, sectors, geographies, deal_size_min_cr, deal_size_max_cr')
+                .in('id', matchedIds);
+              
+              matchCards = dbMatches.map(row => {
+                const cand = candidates?.find(c => c.id === row.matched_proposal_id);
+                const cMin = cand?.deal_size_min_cr ?? 0;
+                const cMax = cand?.deal_size_max_cr ?? 0;
+                
+                const sizeRange = (() => {
+                  if (!cMin && !cMax) return null;
+                  if (cMin === cMax) return `₹${cMin} Cr`;
+                  if (!cMin) return `Up to ₹${cMax} Cr`;
+                  if (!cMax) return `₹${cMin}+ Cr`;
+                  return `₹${cMin}–${cMax} Cr`;
+                })();
+
+                const getScoreLabel = (score: number) => {
+                  if (score >= 75) return 'High';
+                  if (score >= 55) return 'Good';
+                  return 'Possible';
+                };
+
+                return {
+                  matchedProposalId: row.matched_proposal_id,
+                  sector: cand?.sectors?.[0] ?? null,
+                  geography: cand?.geographies?.[0] ?? null,
+                  sizeRange,
+                  finalScore: row.final_score,
+                  scoreLabel: getScoreLabel(row.final_score),
+                  matchReason: row.match_reason,
+                  archetype: row.match_archetype,
+                };
+              });
+              matchSummary = `${dbMatches.length} aligned counterpart${dbMatches.length > 1 ? 'ies' : 'y'} identified.`;
+            }
+          }
+          
+          const dummyExtraction = {
+            intent: storedState.intent,
+            state: storedState,
+            is_complete: true,
+            message: ""
+          };
+          const finalMessage = buildFinalMessage(dummyExtraction, storedState);
+          
+          return NextResponse.json({
+            success: true,
+            data: JSON.stringify(dummyExtraction),
+            message: finalMessage,
+            is_complete: true,
+            quality_gate_passed: storedState.quality_gate_passed,
+            intent_validated: storedState.intent_validated,
+            chatId: activeChatId,
+            proposalId: resolvedProposalId,
+            type: 'complete',
+            matches: matchCards,
+            matchSummary: matchSummary,
+            is_document_intake: storedState.is_document_intake,
+          });
+        }
       }
     }
 
@@ -739,8 +818,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Ensure extraction.is_complete reflects updatedState.is_complete to prevent premature finalMessage building
+    (extraction as Record<string, unknown>).is_complete = updatedState.is_complete;
+
     // ─── FINAL RESPONSE MESSAGE ──────────────────────────────
-    const finalMessage = buildFinalMessage(extraction);
+    let finalMessage = buildFinalMessage(extraction, updatedState);
+    
+    const completionDetected = updatedState.is_complete || finalMessage.includes("Your requirement has been structured successfully");
+    if (completionDetected) {
+      console.log("[MATCHMAKING] Completion detected");
+      updatedState.is_complete = true;
+      (extraction as Record<string, unknown>).is_complete = true;
+      finalMessage = buildFinalMessage(extraction, updatedState);
+    }
+    
     // Sync the LLM extraction message with the delivered finalMessage to prevent duplicates in history
     extraction.message = finalMessage;
 
@@ -770,6 +861,7 @@ export async function POST(req: NextRequest) {
     const shouldInsert = updatedState.is_complete;
 
     if (shouldInsert) {
+      console.log("[STATE] Deal completed");
       console.log("✅ REQUIREMENT COMPLETE — INSERTING INTO DB AND MATCHING");
 
       try {
@@ -839,6 +931,7 @@ export async function POST(req: NextRequest) {
 
         // Matchmaking (background task with 12s synchronous race)
         if (mandateData?.id && extraction.intent) {
+          console.log("[MATCHING] Triggering matching");
           console.log("[M5] Triggering matchmaking pipeline...");
           const { executeMatchmaking } = await import('@/lib/matchmakingEngine');
 
@@ -870,6 +963,7 @@ export async function POST(req: NextRequest) {
           if (matchResult?.cards?.length) {
             matchCards = matchResult.cards;
             matchSummary = matchResult.summary;
+            console.log("[MATCHING] Matches found");
             console.log('[ROUTE] Mandate Activated');
             console.log('[ROUTE] Matching Started');
             console.log(`[ROUTE] Matches Returned: ${matchResult.matchCount}`);
@@ -882,21 +976,9 @@ export async function POST(req: NextRequest) {
           }
 
           // Resolve proposalId for MatchPanel activation.
-          // Primary: matchResult.proposalId (pipeline completed within 12s).
-          // Fallback: DB lookup by mandate_id — Phase 4 of executeMatchmaking inserts
-          // the proposal row before the slow pgvector search, so it exists on timeout too.
-          resolvedProposalId = matchResult?.proposalId ?? null;
-          if (!resolvedProposalId) {
-            const { data: fallbackProp } = await supabase
-              .from('proposals')
-              .select('id')
-              .eq('mandate_id', mandateData.id)
-              .maybeSingle();
-            if (fallbackProp?.id) {
-              resolvedProposalId = fallbackProp.id;
-              console.log('[M5] proposalId resolved via DB fallback:', resolvedProposalId);
-            }
-          }
+          // Fallback immediately to the generated proposalId if the matchmaking search was slow.
+          resolvedProposalId = matchResult?.proposalId ?? proposalId;
+          console.log('[M5] proposalId resolved:', resolvedProposalId);
 
           // Write the authoritative proposalId back into session state so
           // /api/chat/[id] can restore the MatchPanel after navigation/refresh.

@@ -220,7 +220,9 @@ export function updateStateFromExtraction(
     const isFrictionSignal = detectFrictionSignal(currentMessage);
     const meetsMinimumFrictionGuard = updated.intent && hasIndustrySignal && qualifyingFieldsCount >= 1;
 
-    if (isFrictionSignal && meetsMinimumFrictionGuard) {
+    if (current.is_complete) {
+        updated.is_complete = true;
+    } else if (isFrictionSignal && meetsMinimumFrictionGuard) {
         updated.is_complete = true;
         console.log('[STATE] Friction — forcing is_complete=true (Guard: PASS)');
     } else if (isFrictionSignal) {

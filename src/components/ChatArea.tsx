@@ -20,9 +20,10 @@ interface ChatAreaProps {
   messages: Message[];
   onQuestionClick?: (question: string) => void;
   isTyping?: boolean;
+  disableQuestions?: boolean;
 }
 
-export default function ChatArea({ messages, isTyping, onQuestionClick }: ChatAreaProps) {
+export default function ChatArea({ messages, isTyping, onQuestionClick, disableQuestions }: ChatAreaProps) {
   const { profile } = useUser();
   console.log("[ChatArea] Rendering with messages:", messages.length);
 
@@ -88,7 +89,7 @@ export default function ChatArea({ messages, isTyping, onQuestionClick }: ChatAr
                 <span>Deal captured and intelligence extracted successfully.</span>
               </div>
             )}
-            {msg.role === 'assistant' && msg.questions && msg.questions.length > 0 && (
+            {!disableQuestions && msg.role === 'assistant' && msg.questions && msg.questions.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-2">
                 {msg.questions.map((q, idx) => (
                   <button
