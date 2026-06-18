@@ -127,10 +127,10 @@ const COUNTERPARTY_INTENTS: Record<string, string[]> = {
 // ─────────────────────────────────────────────────────────────
 
 const W = {
-  SEMANTIC: 0.45,
+  SEMANTIC: 0.40,   // Phase 4: reduced from 0.45 to give room for geography
   INDUSTRY: 0.35,
   FINANCIAL: 0.10,
-  GEOGRAPHY: 0.05,
+  GEOGRAPHY: 0.10,  // Phase 4: increased from 0.05 — geo proximity matters in India M&A
   FRESHNESS: 0.05,
 } as const;
 
@@ -212,14 +212,31 @@ function applyHardRejections(
   candidate: Candidate,
 ): { rejected: boolean; reason?: string } {
 
-  // HR-1: Intent polarity mismatch (multi-target aware)
-  // Uses COUNTERPARTY_INTENTS array so BUY_SIDE accepts both SELL_SIDE and FUNDRAISING.
-  const expectedIntents = COUNTERPARTY_INTENTS[source.intent] ?? [];
-  if (expectedIntents.length > 0 && !expectedIntents.includes(candidate.intent)) {
-    return { rejected: true, reason: `HR-1: ${candidate.intent} not in expected [${expectedIntents.join(', ')}]` };
+  // 1. Sector Filter (Mandatory)
+  if (source.sector && candidate.sectors?.[0]) {
+    const comp = getSectorCompatibility(source.sector, candidate.sectors[0]);
+    if (comp.level === 'INCOMPATIBLE') {
+      return { rejected: true, reason: `HR-4: Sector incompatibility: ${comp.reason}` };
+    }
   }
 
-  // HR-2: 10× deal size ceiling
+  // 2. Buy/Sell Side Filter (Intent polarity)
+  const expectedIntents = COUNTERPARTY_INTENTS[source.intent] ?? [];
+  if (expectedIntents.length > 0 && !expectedIntents.includes(candidate.intent)) {
+    return { rejected: true, reason: `HR-1: Intent mismatch: ${candidate.intent} not in expected [${expectedIntents.join(', ')}]` };
+  }
+
+  // 3. Deal Structure Filter
+  if (source.structure && candidate.deal_structure) {
+    const src = source.structure.toLowerCase();
+    const cnd = candidate.deal_structure.toLowerCase();
+    if ((src.includes('100%') || src.includes('full buyout')) &&
+      (cnd.includes('minority') || cnd.includes('fundrais'))) {
+      return { rejected: true, reason: 'HR-3: Structure mismatch: Full buyout incompatible with minority fundraise' };
+    }
+  }
+
+  // 4. Revenue / Deal Size Filter
   const sMax = parseNum(source.deal_size_max) ?? 0;
   const cMax = candidate.deal_size_max_cr ?? 0;
   if (sMax > 0 && cMax > 0) {
@@ -229,26 +246,25 @@ function applyHardRejections(
     }
   }
 
-  // HR-3: Full buyout vs minority fundraise
-  if (source.structure && candidate.deal_structure) {
-    const src = source.structure.toLowerCase();
-    const cnd = candidate.deal_structure.toLowerCase();
-    if ((src.includes('100%') || src.includes('full buyout')) &&
-      (cnd.includes('minority') || cnd.includes('fundrais'))) {
-      return { rejected: true, reason: 'HR-3: Full buyout incompatible with minority fundraise' };
+  // 5. Geography Filter
+  if (source.geography && candidate.geographies && candidate.geographies.length > 0) {
+    const srcGeo = source.geography.toLowerCase().trim();
+    if (srcGeo !== 'flexible' && srcGeo !== 'india' && srcGeo !== 'pan india') {
+      const cndGeos = candidate.geographies.map(g => g.toLowerCase().trim());
+      const geoMatched = cndGeos.some(g =>
+        g === srcGeo ||
+        g.includes(srcGeo) ||
+        srcGeo.includes(g) ||
+        sameState(srcGeo, g) ||
+        g === 'flexible' ||
+        g === 'india' ||
+        g === 'pan india'
+      );
+      if (!geoMatched) {
+        return { rejected: true, reason: `Geography mismatch: candidate in [${candidate.geographies.join(', ')}] not aligned with ${source.geography}` };
+      }
     }
   }
-
-  // HR-4: Sector hard incompatibility
-  if (source.sector && candidate.sectors?.[0]) {
-    const comp = getSectorCompatibility(source.sector, candidate.sectors[0]);
-    if (comp.level === 'INCOMPATIBLE') {
-      return { rejected: true, reason: `HR-4: ${comp.reason}` };
-    }
-  }
-
-  // HR-6: Advisor flood cap — max 2 results per contact_phone
-  // (tracked externally in phoneCount map in main engine)
 
   // HR-7: Shell company filtering (NM5)
   if (!source.is_shell_query && candidate.is_shell === true) {
@@ -276,21 +292,112 @@ interface ScoreResult {
   archetype: string;
 }
 
+// Phase 5 & 6: generate structured JSON match reason with bullet-point explanation
+// and fit fields consumed by MatchPanel's detail view (sectorFit, geographyFit, revenueFit, strategicFit)
+function buildMatchReason(
+  source: ProposalInput,
+  candidate: Candidate,
+  breakdown: Record<string, number>,
+  comp: { level: string; reason: string },
+  archetype: string,
+): string {
+  const srcNorm = normalizeSector(source.sector ?? '');
+  const cndNorm = normalizeSector(candidate.sectors?.[0] ?? '');
+  const sectorLabel = (candidate.sectors?.[0] ?? 'target sector').replace(/_/g, ' ');
+  const geoLabel = candidate.geographies?.[0] ?? 'matched region';
+  const cMin = candidate.deal_size_min_cr ?? 0;
+  const cMax = candidate.deal_size_max_cr ?? 0;
+  const sizeLabel = formatSizeRange(cMin, cMax);
+  const { semanticScore, industryScore, financialScore, geoScore } = breakdown;
+
+  // Bullet-point explanation (Phase 6)
+  const bullets: string[] = [];
+  if (srcNorm && srcNorm === cndNorm) {
+    bullets.push(`Exact sector match — same ${sectorLabel} sector`);
+  } else if (industryScore >= 0.45) {
+    bullets.push(`Compatible sector: ${sectorLabel} — ${archetype.toLowerCase()}`);
+  }
+  if (geoScore >= 0.9) {
+    bullets.push(`Exact geography: ${geoLabel}`);
+  } else if (geoScore >= 0.75) {
+    bullets.push(`Same region: ${geoLabel}`);
+  } else if (geoScore >= 0.45) {
+    bullets.push(`Same state: ${geoLabel}`);
+  } else if (geoScore >= 0.2) {
+    bullets.push(`Same zone: ${geoLabel}`);
+  }
+  if (financialScore >= 0.7) {
+    bullets.push(`Strong financial alignment${sizeLabel ? ': ' + sizeLabel : ''}`);
+  } else if (sizeLabel) {
+    bullets.push(`Deal size: ${sizeLabel}`);
+  }
+  if (semanticScore >= 0.7) {
+    bullets.push('Strong mandate-to-opportunity semantic alignment');
+  } else if (semanticScore >= 0.5) {
+    bullets.push('Moderate mandate alignment detected');
+  }
+  if (bullets.length === 0) {
+    bullets.push(`${sectorLabel} opportunity in ${geoLabel}${sizeLabel ? ' · ' + sizeLabel : ''}`);
+  }
+  const reason = bullets.map(b => `• ${b}`).join('\n');
+
+  // Fit field texts for MatchPanel detail view (Phase 5)
+  const sectorFit = srcNorm === cndNorm
+    ? `Exact match — ${sectorLabel}`
+    : industryScore >= 0.45
+      ? `Compatible — ${comp.reason.split('.')[0]}`
+      : `Adjacent — ${comp.reason.split('.')[0]}`;
+
+  const geographyFit = geoScore >= 0.9
+    ? `Exact: ${geoLabel}`
+    : geoScore >= 0.75
+      ? `Same region: ${geoLabel}`
+      : geoScore >= 0.45
+        ? `Same state: ${geoLabel}`
+        : geoScore >= 0.2
+          ? `Same zone: ${geoLabel}`
+          : geoLabel;
+
+  const revenueFit = sizeLabel
+    ? financialScore >= 0.7
+      ? `Strong overlap: ${sizeLabel}`
+      : `Within range: ${sizeLabel}`
+    : null;
+
+  const strategicFit = source.intent_focus ?? null;
+
+  return JSON.stringify({
+    reason,
+    sectorFit,
+    geographyFit,
+    ...(revenueFit ? { revenueFit } : {}),
+    ...(strategicFit ? { strategicFit } : {}),
+  });
+}
+
 function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreResult {
 
   // SEMANTIC (45%) — raw cosine similarity from pgvector
   const semanticScore = Math.max(0, Math.min(1, candidate.similarity));
 
   // INDUSTRY ALIGNMENT (35%) — sector compatibility via DC-KB-003
+  const srcNorm = normalizeSector(source.sector ?? '');
+  const cndNorm = normalizeSector(candidate.sectors?.[0] ?? '');
+  const isSameSector = srcNorm === cndNorm;
+
   const comp = getSectorCompatibility(
     source.sector ?? '',
     candidate.sectors?.[0] ?? '',
   );
   let industryScore = 0;
-  switch (comp.level) {
-    case 'COMPATIBLE': industryScore = 1.0; break;
-    case 'NARROW': industryScore = 0.45; break;
-    default: industryScore = 0.1;
+  if (isSameSector) {
+    industryScore = 1.0;
+  } else if (comp.level === 'COMPATIBLE') {
+    industryScore = 0.5; // Lower industry score for cross-sector compatible
+  } else if (comp.level === 'NARROW') {
+    industryScore = 0.25;
+  } else {
+    industryScore = 0.1;
   }
 
   // FINANCIAL (10%) — deal size Jaccard overlap
@@ -308,17 +415,8 @@ function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreRes
     financialScore = union > 0 ? overlap / union : 0.1;
   }
 
-  // GEOGRAPHY (5%) — geo string matching
-  const srcGeo = (source.geography ?? '').toLowerCase();
-  const cndGeos = (candidate.geographies ?? []).map(g => g.toLowerCase());
-  let geoScore = 0;
-  if (srcGeo && cndGeos.length) {
-    if (cndGeos.some(g => g === srcGeo || g.includes(srcGeo) || srcGeo.includes(g))) {
-      geoScore = 1.0;
-    } else if (cndGeos.some(g => sameState(srcGeo, g))) {
-      geoScore = 0.5;
-    }
-  }
+  // GEOGRAPHY (10%) — 5-level proximity scoring (Phase 4)
+  const geoScore = getGeoProximityScore(source.geography ?? '', candidate.geographies ?? []);
 
   // FRESHNESS (5%) — recency bonus
   let freshnessScore = 0.5;
@@ -338,9 +436,13 @@ function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreRes
     freshnessScore * W.FRESHNESS * 100;
 
   // ADJUSTMENTS
+  if (!isSameSector) finalScore -= 15; // Cross-sector penalty to guarantee same-sector preference
   if (comp.level === 'NARROW') finalScore -= 10;
-  if (geoScore === 1.0) finalScore += 8;
-  else if (geoScore === 0.5) finalScore += 4;
+  // Phase 4: tiered geo bonus (5 proximity levels)
+  if (geoScore >= 0.9) finalScore += 10;       // exact city
+  else if (geoScore >= 0.75) finalScore += 7;   // city-in-region
+  else if (geoScore >= 0.45) finalScore += 4;   // same state
+  else if (geoScore >= 0.2) finalScore += 2;    // same zone
   if (candidate.quality_tier === 1) finalScore += 5;
   else if (candidate.quality_tier === 2) finalScore += 2;
 
@@ -348,8 +450,6 @@ function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreRes
 
   // ARCHETYPE
   let archetype: string = MATCH_ARCHETYPES.CROSS_SECTOR;
-  const srcNorm = normalizeSector(source.sector ?? '');
-  const cndNorm = normalizeSector(candidate.sectors?.[0] ?? '');
   if (!source.sector || srcNorm === cndNorm) {
     archetype = MATCH_ARCHETYPES.BOLT_ON;
   } else if (comp.reason.includes('licence') || comp.reason.includes('Licence')) {
@@ -360,17 +460,9 @@ function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreRes
     archetype = MATCH_ARCHETYPES.TECH_ENABLER;
   }
 
-  // MATCH REASON — anonymous, shown on match card
-  const sectorLabel = candidate.sectors?.[0] ?? 'target sector';
-  const geoLabel = candidate.geographies?.[0] ?? 'matched region';
-  const sizeLabel = formatSizeRange(cMin, cMax);
-  const reasonParts = [
-    `${sectorLabel} in ${geoLabel}${sizeLabel ? ` · ${sizeLabel}` : ''}.`,
-    comp.reason.split('.')[0] + '.',
-  ];
-  if (financialScore > 0.7) reasonParts.push('Strong financial alignment.');
-  else if (semanticScore > 0.7) reasonParts.push('Strong mandate alignment.');
-  const matchReason = reasonParts.join(' ');
+  // MATCH REASON — structured JSON (Phases 5 & 6): bullet-point reason + sectorFit / geographyFit / revenueFit
+  const breakdown = { semanticScore, industryScore, financialScore, geoScore, freshnessScore };
+  const matchReason = buildMatchReason(source, candidate, breakdown, comp, archetype);
 
   return {
     finalScore,
@@ -408,14 +500,57 @@ function sameState(geo1: string, geo2: string): boolean {
   const groups = [
     ['mumbai', 'pune', 'nashik', 'nagpur', 'maharashtra', 'mh'],
     ['ahmedabad', 'surat', 'gujarat', 'rajkot', 'vadodara', 'gj'],
-    ['delhi', 'noida', 'gurgaon', 'faridabad', 'ncr', 'new delhi'],
+    ['delhi', 'noida', 'gurgaon', 'gurugram', 'faridabad', 'ncr', 'new delhi'],
     ['bangalore', 'bengaluru', 'mysore', 'karnataka'],
-    ['hyderabad', 'telangana', 'andhra'],
-    ['chennai', 'coimbatore', 'tamil nadu', 'tn'],
+    ['hyderabad', 'secunderabad', 'telangana', 'andhra'],
+    ['chennai', 'coimbatore', 'madurai', 'tamil nadu', 'tn'],
     ['kolkata', 'west bengal', 'wb'],
     ['lucknow', 'kanpur', 'uttar pradesh', 'up'],
+    ['kochi', 'trivandrum', 'thiruvananthapuram', 'kerala'],
+    ['bhopal', 'indore', 'madhya pradesh', 'mp'],
   ];
   return groups.some(g => g.some(k => geo1.includes(k)) && g.some(k => geo2.includes(k)));
+}
+
+// Phase 4: broader geographic zone groupings (cross-state clusters)
+function sameZone(geo1: string, geo2: string): boolean {
+  const ZONES: string[][] = [
+    // Western India
+    ['mumbai', 'pune', 'nashik', 'nagpur', 'maharashtra', 'mh', 'ahmedabad', 'surat',
+     'gujarat', 'rajkot', 'vadodara', 'gj', 'goa', 'rajasthan', 'jaipur', 'udaipur'],
+    // Northern India / NCR
+    ['delhi', 'noida', 'gurgaon', 'gurugram', 'faridabad', 'ncr', 'new delhi', 'lucknow',
+     'kanpur', 'uttar pradesh', 'up', 'punjab', 'haryana', 'chandigarh', 'amritsar'],
+    // Southern India
+    ['bangalore', 'bengaluru', 'mysore', 'karnataka', 'hyderabad', 'secunderabad',
+     'telangana', 'andhra', 'vizag', 'visakhapatnam', 'chennai', 'coimbatore',
+     'madurai', 'tamil nadu', 'tn', 'kerala', 'kochi', 'trivandrum', 'thiruvananthapuram'],
+    // Eastern India
+    ['kolkata', 'west bengal', 'wb', 'odisha', 'bhubaneswar', 'jharkhand', 'ranchi',
+     'patna', 'bihar'],
+    // Central India
+    ['bhopal', 'indore', 'madhya pradesh', 'mp', 'raipur', 'chhattisgarh'],
+  ];
+  return ZONES.some(z => z.some(k => geo1.includes(k)) && z.some(k => geo2.includes(k)));
+}
+
+// Phase 4: 5-level geo proximity scorer
+function getGeoProximityScore(srcGeo: string, cndGeos: string[]): number {
+  if (!srcGeo || !cndGeos.length) return 0;
+  const src = srcGeo.toLowerCase().trim();
+  const cndLower = cndGeos.map(g => g.toLowerCase().trim());
+  const panIndia = ['india', 'pan-india', 'pan india', 'all india', 'nationwide', 'pan', 'flexible'];
+  // Pan-India mandate — partial credit (they accept anywhere)
+  if (cndLower.some(g => panIndia.includes(g)) || panIndia.includes(src)) return 0.15;
+  // Level 1: exact city match
+  if (cndLower.some(g => g === src)) return 1.0;
+  // Level 2: one string contains the other (e.g. "Pune" ⊂ "Pune, Maharashtra")
+  if (cndLower.some(g => g.includes(src) || src.includes(g))) return 0.80;
+  // Level 3: same state cluster
+  if (cndLower.some(g => sameState(src, g))) return 0.50;
+  // Level 4: same broad zone
+  if (cndLower.some(g => sameZone(src, g))) return 0.25;
+  return 0;
 }
 
 function computeQualityScore(input: ProposalInput): number {
@@ -595,6 +730,7 @@ export async function executeMatchmaking(
 
   console.log("[MATCHING] Triggering matching");
   console.log('[M5] ====== MATCHMAKING ENGINE STARTED ======');
+  console.log('[MATCHMAKING_TRIGGERED] Matchmaking triggered.');
   console.log(`[M5] intent: ${input.intent} | sector: ${input.sector} | geo: ${input.geography}`);
 
   const supabase = createServerSupabaseClient();
@@ -611,6 +747,7 @@ export async function executeMatchmaking(
 
     console.log('[M5] Storage text:', storageText.slice(0, 80) + '...');
     console.log('[M5] Query text (reversed):', queryText.slice(0, 80) + '...');
+    console.log(`[MATCH_QUERY_GENERATED] Matching query generated: "${queryText.slice(0, 100)}..."`);
 
     // ── Phase 2/3: Generate embeddings ───────────────────────
     const [storageEmbedding, queryEmbeddingRaw] = await Promise.all([
@@ -679,13 +816,21 @@ export async function executeMatchmaking(
     if (embErr) console.warn('[M5] Embedding RPC failed (non-blocking):', embErr.message);
     else console.log('[M5] Storage embedding stored');
 
+    // Fetch total active proposals count from public DB for observability
+    let totalActiveProposals = 0;
+    try {
+      const { count } = await supabase
+        .from('proposals')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'ACTIVE');
+      totalActiveProposals = count ?? 0;
+    } catch (e) {
+      console.warn('[M5] Failed to fetch total active proposals count:', e);
+    }
+    console.log(`[TOTAL_ACTIVE_PROPOSALS] Total Active Proposals: ${totalActiveProposals}`);
+
     // ── Phase 6: pgvector ANN search ─────────────────────────
-    // FIX: parameter names updated to match current SQL function signature
-    // (match_proposals was changed in 20260515 + 20260521 migrations):
-    //   query_intent  → match_intents (TEXT[], pre-flipped counterparty intents)
-    //   query_user_id → exclude_user_id
-    //   match_limit   → result_count
-    //   exclude_shells removed (not in SQL; shell filtering is HR-7 in TypeScript)
+    // result_count increased to 1000 to search complete universe of candidates
     const targetIntents = COUNTERPARTY_INTENTS[input.intent] ?? [input.intent];
     console.log('[M5] Target counterparty intents:', targetIntents);
     console.log("[MATCHMAKING] Search started");
@@ -694,7 +839,7 @@ export async function executeMatchmaking(
       match_intents: targetIntents,
       exclude_user_id: input.userId,
       min_quality: 3,
-      result_count: 30,
+      result_count: 1000,
     });
 
     if (searchErr) {
@@ -706,6 +851,7 @@ export async function executeMatchmaking(
     const candidates = (rawCandidates ?? []) as Candidate[];
     console.log("[MATCHMAKING] Candidates found");
     console.log('[M5] Candidates from pgvector:', candidates.length);
+    console.log(`[MATCHES_RETRIEVED] Retrieved ${candidates.length} candidates from database query.`);
 
     if (candidates.length === 0) {
       await saveForAsyncRematch(supabase, proposal.id, input, searchEmbedding);
@@ -728,8 +874,29 @@ export async function executeMatchmaking(
       status: string;
     }> = [];
 
+    // Diagnostic filter checks on retrieved candidates
+    let sectorMatchCount = 0;
+    let geographyMatchCount = 0;
+    let sizeMatchCount = 0;
+    let eligibleMatchCount = 0;
+
     for (const cand of candidates) {
       const { rejected, reason } = applyHardRejections(input, cand);
+
+      // Track individual filter diagnostics
+      const sectorComp = getSectorCompatibility(input.sector ?? '', cand.sectors?.[0] ?? '');
+      if (sectorComp.level !== 'INCOMPATIBLE') sectorMatchCount++;
+
+      const srcGeo = (input.geography ?? '').toLowerCase();
+      const cndGeos = (cand.geographies ?? []).map(g => g.toLowerCase());
+      const geoMatched = !srcGeo || cndGeos.length === 0 || cndGeos.some(g => g === srcGeo || g.includes(srcGeo) || srcGeo.includes(g) || sameState(srcGeo, g));
+      if (geoMatched) geographyMatchCount++;
+
+      const sMax = parseNum(input.deal_size_max) ?? 0;
+      const cMax = cand.deal_size_max_cr ?? 0;
+      const sizeMatched = !(sMax > 0 && cMax > 0 && (Math.max(sMax, cMax) / Math.max(Math.min(sMax, cMax), 0.01)) > 10);
+      if (sizeMatched) sizeMatchCount++;
+
       if (rejected) { console.log(`[M5] REJECT ${cand.id}: ${reason}`); continue; }
 
       // HR-6: Advisor flood cap
@@ -741,6 +908,7 @@ export async function executeMatchmaking(
         }
       }
 
+      eligibleMatchCount++;
       const scored = calculateV2Score(input, cand);
       console.log(`[M5] SCORE ${cand.id.slice(-8)}: ${scored.finalScore} (${scored.archetype})`);
 
@@ -761,9 +929,16 @@ export async function executeMatchmaking(
       }
     }
 
+    console.log(`[SECTOR_MATCHES] Sector matches count: ${sectorMatchCount}`);
+    console.log(`[GEOGRAPHY_MATCHES] Geography matches count: ${geographyMatchCount}`);
+    console.log(`[SIZE_MATCHES] Size matches count: ${sizeMatchCount}`);
+    console.log(`[MATCHES_FILTERED] Filtered matches count: ${eligibleMatchCount}`);
+
     // Sort by score descending, keep top 10
     scoredRows.sort((a, b) => b.final_score - a.final_score);
     const topRows = scoredRows.slice(0, 10);
+    console.log(`[MATCHES_RANKED] Ranked matches: ${topRows.length} qualified matches (score >= 40).`);
+    console.log(`[FINAL_MATCHES] Final matches count: ${topRows.length}`);
 
     // ── Phase 9: Store matches ────────────────────────────────
     if (topRows.length > 0) {
@@ -795,6 +970,8 @@ export async function executeMatchmaking(
     console.log("[MATCHING] Matches found");
     console.log("[MATCHMAKING] Finished");
     console.log(`[M5] ====== COMPLETE: ${topRows.length} matches, top score ${topScore} ======`);
+    console.log(`[MATCHES_RETURNED] Returning ${cards.length} match cards for frontend display.`);
+    console.log(`[FINAL_MATCH_COUNT] Final Ranked Matches: ${topRows.length}`);
 
     return {
       proposalId: proposal.id,

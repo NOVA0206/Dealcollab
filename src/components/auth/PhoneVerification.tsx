@@ -1,13 +1,12 @@
 'use client';
 import React, { useState } from 'react';
-import { Smartphone, Send, ShieldCheck, ArrowLeft, AlertCircle, PhoneCall, MessageSquare } from 'lucide-react';
+import { Smartphone, Send, ShieldCheck, ArrowLeft, AlertCircle } from 'lucide-react';
 import { useSession } from 'next-auth/react';
 
 interface PhoneVerificationProps {
   onVerify: () => void;
-  onBack: () => void;
+  onBack?: () => void;
   initialPhone?: string | null;
-  isFromWhatsApp?: boolean;
 }
 
 export default function PhoneVerification({ onVerify, onBack, initialPhone }: PhoneVerificationProps) {
@@ -16,7 +15,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
   const [error, setError] = useState<string | null>(null);
   const { data: session, update } = useSession();
 
-  const handleSubmit = async (e: React.SyntheticEvent, method: 'whatsapp' | 'call' | 'manual' = 'manual') => {
+  const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
@@ -37,7 +36,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
         const res = await fetch('/api/auth/save-phone', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: formattedPhone, verificationMethod: method }),
+          body: JSON.stringify({ phone: formattedPhone }),
         });
         const data = await res.json();
         
@@ -93,15 +92,17 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-700">
-      {/* Header with Back Button */}
+      {/* Header */}
       <div className="flex items-center gap-3">
-        <button 
-          type="button"
-          onClick={onBack}
-          className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-all active:scale-90 text-gray-400 group"
-        >
-          <ArrowLeft size={18} className="group-hover:text-[#F97316] transition-colors" />
-        </button>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-all active:scale-90 text-gray-400 group"
+          >
+            <ArrowLeft size={18} className="group-hover:text-[#F97316] transition-colors" />
+          </button>
+        )}
         <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em]">
           Identity Trust Layer
         </span>
@@ -143,7 +144,7 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
         <div className="space-y-3 pt-2">
           <button
             type="button"
-            onClick={(e) => handleSubmit(e, 'manual')}
+            onClick={handleSubmit}
             disabled={isLoading || !phone}
             className="w-full bg-[#1F2937] text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#F97316] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all shadow-xl hover:shadow-[#F97316]/20 disabled:opacity-50 group"
           >
@@ -156,27 +157,6 @@ export default function PhoneVerification({ onVerify, onBack, initialPhone }: Ph
               </>
             )}
           </button>
-
-          <div className="grid grid-cols-2 gap-3 pt-2">
-             <button
-                type="button"
-                onClick={(e) => handleSubmit(e, 'whatsapp')}
-                disabled={isLoading || !phone}
-                className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-green-50 hover:border-green-200 hover:text-green-700 active:scale-[0.98] transition-all disabled:opacity-50"
-              >
-                <MessageSquare size={14} />
-                Confirm via WhatsApp
-             </button>
-             <button
-                type="button"
-                onClick={(e) => handleSubmit(e, 'call')}
-                disabled={isLoading || !phone}
-                className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 active:scale-[0.98] transition-all disabled:opacity-50"
-              >
-                <PhoneCall size={14} />
-                Verify via Call
-             </button>
-          </div>
         </div>
       </div>
 

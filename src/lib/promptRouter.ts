@@ -12,6 +12,7 @@ import {
   detectRevenueFromText,
   detectShellQuery,
   detectGatewaySector,
+  detectIntentFocusFromText,
 } from './detectors';
 import {
   createBlankState,
@@ -34,6 +35,7 @@ import {
   buildQualityGateFailModule,
   M_DOCUMENT_INTAKE,
 } from './M7_specialModes';
+import { buildM8_MandateVerification } from './M8_mandateVerification';
 
 // ─────────────────────────────────────────────────────────────
 // RE-EXPORTS — route.ts imports from '@/lib/promptRouter'
@@ -54,6 +56,7 @@ export {
   detectRevenueFromText,
   detectShellQuery,
   detectGatewaySector,
+  detectIntentFocusFromText,
   createBlankState,
   updateStateFromExtraction,
   initializeStateFromDocument,
@@ -82,8 +85,15 @@ export function buildSystemPrompt(
   if (state.is_profile_search || state.phase === 'PROFILE_SEARCH') {
     modules.push({ key: 'M6_profile_intelligence', content: M6_PROFILE_INTELLIGENCE });
 
+  } else if (state.phase === 'MANDATE_VERIFICATION') {
+    // NM8: Multi-step mandate verification framework
+    modules.push({
+      key: `M8_mandate_verification_${state.verification_step ?? 'AUTHORITY'}`,
+      content: buildM8_MandateVerification(state.verification_step ?? 'AUTHORITY'),
+    });
+
   } else if (state.phase === 'INTENT_VALIDATION') {
-    // NM7: Awaiting intent confirmation
+    // NM7: Legacy binary confirmation (backward compat)
     modules.push({ key: 'M_intent_validation', content: M_INTENT_VALIDATION });
 
   } else if (state.quality_gate_attempted && !state.quality_gate_passed) {
@@ -111,11 +121,16 @@ export function buildSystemPrompt(
     const gatewayActive = !!state.gateway_clarifier;
 
     // M4 loads ONCE per session (m4_questions_asked gate)
+    // Phase 1: skip when industry_data already has ≥2 rich fields — user answered M4 upfront
     if (!state.m4_questions_asked && !geoGateActive && !gatewayActive) {
-      if (state.sub_sector === 'shell_company') {
-        modules.push({ key: 'M4_shell', content: M4_SHELL });
-      } else if (state.sector && M4_MODULES[state.sector]) {
-        modules.push({ key: `M4_${state.sector}`, content: M4_MODULES[state.sector] });
+      const richM4Count = Object.values(state.industry_data || {})
+        .filter(v => typeof v === 'string' && (v as string).trim().length > 3).length;
+      if (richM4Count < 2) {
+        if (state.sub_sector === 'shell_company') {
+          modules.push({ key: 'M4_shell', content: M4_SHELL });
+        } else if (state.sector && M4_MODULES[state.sector]) {
+          modules.push({ key: `M4_${state.sector}`, content: M4_MODULES[state.sector] });
+        }
       }
     }
 
@@ -197,6 +212,15 @@ export function buildSystemPrompt(
     });
   }
 
+  // NM8: Verification state lines (only shown in MANDATE_VERIFICATION phase)
+  const verificationLines = state.phase === 'MANDATE_VERIFICATION' ? [
+    `# VERIFICATION_STEP: ${state.verification_step ?? 'AUTHORITY'} — ask ONLY this step's question`,
+    state.verification_authority ? `# VERIFICATION_AUTHORITY_CAPTURED: ${state.verification_authority} — do NOT ask again` : '',
+    state.verification_readiness ? `# VERIFICATION_READINESS_CAPTURED: ${state.verification_readiness} — do NOT ask again` : '',
+    (state.verification_materials ?? []).length > 0 ? `# VERIFICATION_MATERIALS_CAPTURED: ${(state.verification_materials ?? []).join(', ')} — do NOT ask again` : '',
+    state.mandate_confidence_score !== null ? `# MANDATE_CONFIDENCE_SCORE: ${state.mandate_confidence_score} | TIER: ${state.mandate_confidence_tier}` : '',
+  ].filter(Boolean) : [];
+
   const phaseContext = [
     `\n# CURRENT CONVERSATION PHASE: ${state.phase}`,
     `# CURRENT INTENT: ${state.intent ?? 'unknown'}`,
@@ -229,6 +253,7 @@ export function buildSystemPrompt(
       : state.m4_questions_asked
         ? `# M4 PREVIOUSLY ASKED (prior turn) — extract user's answers into industry_data. is_complete=true is now ALLOWED if all key info is gathered.`
         : `# M4 NOT LOADED THIS TURN. Do NOT set m4_questions_asked=true. Do NOT set is_complete=true — sector enrichment questions have not been asked yet.`,
+    ...verificationLines,
   ].join('\n');
 
   const systemPrompt = [

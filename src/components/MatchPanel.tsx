@@ -47,7 +47,6 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
     const [loading, setLoading] = useState(true);
     const [view, setView] = useState<View>('list');
     const [selected, setSelected] = useState<Match | null>(null);
-    const [connecting, setConnecting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [pollsCount, setPollsCount] = useState(0);
 
@@ -81,15 +80,10 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
 
     useEffect(() => {
         let isMounted = true;
-        let pollCount = 0;
-        let timerId: NodeJS.Timeout;
 
         const doFetch = async () => {
             if (!isMounted) return;
             await fetchMatches();
-            
-            // Re-read data via state isn't synchronous, so we just poll based on count
-            // We'll rely on the next render's data value to decide whether to continue
         };
 
         doFetch();
@@ -111,40 +105,6 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
         return () => clearTimeout(timerId);
     }, [data, pollsCount, fetchMatches]);
 
-    const handleConnect = async () => {
-        if (!selected) return;
-        setConnecting(true);
-        setError(null);
-        try {
-            const res = await fetch('/api/matches/connect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ proposalId, matchedProposalId: selected.proposalId }),
-            });
-            const json = await res.json();
-            if (!json.success) {
-                if (json.errorCode === 'INSUFFICIENT_TOKENS') {
-                    setError(`Not enough tokens. You need ${json.tokensRequired}, you have ${json.newBalance}.`);
-                } else {
-                    setError(json.message || 'Connection failed');
-                }
-                return;
-            }
-            // Update local state with revealed contact
-            setSelected({
-                ...selected,
-                isConnected: true,
-                revealedContact: json.counterparty,
-            });
-            setView('connected');
-            // Refresh matches so other cards reflect new token balance
-            await fetchMatches();
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setConnecting(false);
-        }
-    };
 
     if (loading && !data) return <div className="p-4 text-sm text-gray-500">Loading matches…</div>;
     if (error && !data) return <div className="p-4 text-sm text-red-600">{error}</div>;
@@ -156,17 +116,21 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
                 <div className="p-4 rounded-lg border border-amber-200 bg-amber-50 animate-pulse">
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
-                        <p className="text-sm font-medium text-amber-900">Searching for aligned counterparties...</p>
+                        <p className="text-sm font-medium text-amber-900">Scanning the network for aligned counterparties…</p>
                     </div>
-                    <p className="text-xs text-amber-700 mt-1">Our AI is analyzing the network to find the best fit for your mandate.</p>
+                    <p className="text-xs text-amber-700 mt-1">Our intelligence engine is evaluating sector, geography, deal size, and strategic fit across the proposal universe.</p>
                 </div>
             );
         } else {
             return (
-                <div className="p-4 rounded-lg border border-gray-200 bg-gray-50">
-                    <p className="text-sm font-medium text-gray-900">No immediate matches found.</p>
-                    <p className="text-xs text-gray-600 mt-1">Your mandate has been added to our queue. We will notify you via email when a suitable counterparty joins the platform.</p>
-                    <button onClick={onStartOver} className="mt-3 text-xs text-gray-500 underline w-full text-left">
+                <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-green-500 rounded-full" />
+                        <p className="text-sm font-medium text-gray-900">Mandate Monitoring Active</p>
+                    </div>
+                    <p className="text-xs text-gray-600">No immediate matches found. Your mandate has been registered and remains live for 90 days.</p>
+                    <p className="text-xs text-gray-500">New proposals, mandates, and advisor submissions are continuously evaluated. You will be notified when relevant counterparties are identified.</p>
+                    <button onClick={onStartOver} className="mt-1 text-xs text-gray-500 underline w-full text-left">
                         Start over with a new mandate
                     </button>
                 </div>
@@ -185,35 +149,54 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
                     </span>
                 </div>
                 {data.matches.map((m) => {
-                    const isVerified = m.label === 'VERIFIED_MATCH';
-                    const labelText = isVerified ? 'Verified Match' : 'High Confidence';
-                    const labelClass = isVerified
+                    const labelText = m.finalScore >= 75 ? 'High Match' : m.finalScore >= 55 ? 'Good Match' : 'Possible Match';
+                    const labelClass = m.finalScore >= 75
                         ? 'bg-green-100 text-green-800'
-                        : 'bg-amber-100 text-amber-800';
+                        : m.finalScore >= 55
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-gray-100 text-gray-700';
                     return (
                         <div key={m.matchId} className="border rounded-lg p-3 hover:border-amber-400 transition">
                             <div className="flex items-start justify-between mb-2">
                                 <div className="flex items-center gap-1 flex-wrap">
                                     <span className="text-xs font-bold text-amber-600">{m.rank}</span>
                                     <span className={`text-xs px-2 py-0.5 rounded font-medium ${labelClass}`}>{labelText}</span>
+                                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium border border-gray-200">Score: {m.finalScore}</span>
                                     {m.isConnected && (
                                         <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Connected</span>
                                     )}
                                 </div>
-                                <span className="text-xs text-gray-400 shrink-0">Score {(m.finalScore * 100).toFixed(0)}%</span>
                             </div>
                             <p className="text-sm font-medium mb-1">{m.summary}</p>
+                            {(m.sectorFit || m.geographyFit) && (
+                                <div className="flex gap-1 flex-wrap mb-2">
+                                    {m.sectorFit && (
+                                        <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-100">
+                                            ⬡ {m.sectorFit.length > 45 ? `${m.sectorFit.slice(0, 45)}…` : m.sectorFit}
+                                        </span>
+                                    )}
+                                    {m.geographyFit && (
+                                        <span className="text-xs px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-100">
+                                            ◎ {m.geographyFit.length > 45 ? `${m.geographyFit.slice(0, 45)}…` : m.geographyFit}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                             <p className="text-xs text-gray-600 mb-2">{m.reason}</p>
                             {m.teaser && <p className="text-xs text-gray-500 italic line-clamp-2">{m.teaser}</p>}
                             <button
                                 onClick={() => { setSelected(m); setView(m.isConnected ? 'connected' : 'detail'); }}
                                 className="mt-2 text-xs font-medium text-amber-700 hover:underline"
                             >
-                                View {m.rank} →
+                                View details →
                             </button>
                         </div>
                     );
                 })}
+                <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+                    <p className="text-xs font-semibold text-green-800">✓ Mandate Monitoring Active</p>
+                    <p className="text-xs text-green-700 mt-0.5">New counterparties are continuously evaluated against your mandate. Stronger matches surface as the network grows.</p>
+                </div>
                 <button onClick={onStartOver} className="text-xs text-gray-500 underline">
                     Start over with a new mandate
                 </button>
@@ -223,9 +206,12 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
 
     // DETAIL view — selected match without Connect button
     if (view === 'detail' && selected) {
-        const isVerified = selected.label === 'VERIFIED_MATCH';
-        const labelText = isVerified ? 'Verified Match' : 'High Confidence';
-        const labelClass = isVerified ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800';
+        const labelText = selected.finalScore >= 75 ? 'High Match' : selected.finalScore >= 55 ? 'Good Match' : 'Possible Match';
+        const labelClass = selected.finalScore >= 75
+            ? 'bg-green-100 text-green-800'
+            : selected.finalScore >= 55
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-gray-100 text-gray-700';
         return (
             <div className="space-y-3 border rounded-lg p-4">
                 <div className="flex items-center justify-between">
@@ -233,34 +219,34 @@ export function MatchPanel({ proposalId, onStartOver }: { proposalId: string; on
                         <h3 className="text-sm font-semibold">{selected.rank}</h3>
                         <span className={`text-xs px-2 py-0.5 rounded font-medium ${labelClass}`}>{labelText}</span>
                     </div>
-                    <span className="text-xs text-gray-400">Score {(selected.finalScore * 100).toFixed(0)}%</span>
                 </div>
                 <p className="text-sm font-medium">{selected.summary}</p>
                 <p className="text-xs text-gray-600">{selected.reason}</p>
 
                 {(selected.sectorFit || selected.revenueFit || selected.strategicFit || selected.geographyFit) && (
-                    <div className="bg-gray-50 rounded p-3 space-y-1.5">
+                    <div className="bg-gray-50 rounded p-3 space-y-2">
+                        <p className="text-xs font-semibold text-gray-700">Why this matched:</p>
                         {selected.sectorFit && (
                             <div className="flex gap-2 text-xs">
-                                <span className="text-gray-500 w-24 shrink-0">Sector fit</span>
+                                <span className="text-gray-500 w-28 shrink-0">Sector alignment</span>
                                 <span className="text-gray-800">{selected.sectorFit}</span>
                             </div>
                         )}
                         {selected.geographyFit && (
                             <div className="flex gap-2 text-xs">
-                                <span className="text-gray-500 w-24 shrink-0">Geography fit</span>
+                                <span className="text-gray-500 w-28 shrink-0">Geography alignment</span>
                                 <span className="text-gray-800">{selected.geographyFit}</span>
                             </div>
                         )}
                         {selected.revenueFit && (
                             <div className="flex gap-2 text-xs">
-                                <span className="text-gray-500 w-24 shrink-0">Revenue fit</span>
+                                <span className="text-gray-500 w-28 shrink-0">Deal size alignment</span>
                                 <span className="text-gray-800">{selected.revenueFit}</span>
                             </div>
                         )}
                         {selected.strategicFit && (
                             <div className="flex gap-2 text-xs">
-                                <span className="text-gray-500 w-24 shrink-0">Strategic fit</span>
+                                <span className="text-gray-500 w-28 shrink-0">Strategic alignment</span>
                                 <span className="text-gray-800">{selected.strategicFit}</span>
                             </div>
                         )}

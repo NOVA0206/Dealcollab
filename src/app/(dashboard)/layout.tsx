@@ -19,10 +19,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    console.log('[HOME ACCESS CHECK] mounted:', mounted, '| status:', status, '| isAuthenticated:', isAuthenticated);
     if (mounted && status === 'unauthenticated') {
+      console.warn('[MIDDLEWARE DECISION] status=unauthenticated → router.replace("/") ← THIS IS THE LINE SENDING USER BACK');
       router.replace('/');
     }
-  }, [mounted, status, router]);
+  }, [mounted, status, router, isAuthenticated]);
 
   // Prevent hydration mismatch by rendering null on the server and first client pass
   if (!mounted || status === 'loading') {

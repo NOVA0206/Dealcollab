@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import { extractTextFromFile } from '../src/lib/documentParser';
 
 async function test() {
   const buffer = fs.readFileSync('Project_Damodar.pdf');
@@ -19,7 +18,7 @@ async function test() {
   const pdfDoc = await loadingTask.promise;
   const page = await pdfDoc.getPage(1);
   const content = await page.getTextContent();
-  const pageText = content.items.map((item: any) => item.str ?? '').join(' ');
+  const pageText = content.items.map((item: { str?: string }) => item.str ?? '').join(' ');
   console.log("Extracted page text with CDN font data:\n", pageText);
 }
 

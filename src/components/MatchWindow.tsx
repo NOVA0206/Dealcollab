@@ -1,6 +1,7 @@
 'use client';
+
 import React, { useEffect, useState } from 'react';
-import { Sparkles, Search, TrendingUp, MapPin, Building2, Shield } from 'lucide-react';
+import { Sparkles, Search, MapPin, Building2, Shield } from 'lucide-react';
 import ActionButtons from './ActionButtons';
 import { useUser } from './UserProvider';
 import { DealStatus } from './StatusBadge';
@@ -54,18 +55,18 @@ interface MatchWindowProps {
 // SCORE BADGE — color-coded confidence indicator
 // ─────────────────────────────────────────────────────────────
 
-function ScoreBadge({ score }: { score: number }) {
-  const color = score >= 80 ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
-    : score >= 60 ? 'text-amber-700 bg-amber-50 border-amber-100'
-    : 'text-gray-600 bg-gray-50 border-gray-100';
-
-  const label = score >= 80 ? 'Strong' : score >= 60 ? 'Good' : 'Moderate';
-
+function ScoreBadge(props: { score: number }) {
+  const score = props.score;
+  let colorClass = 'bg-gray-100 text-gray-800 border-gray-200';
+  if (score >= 80) {
+    colorClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  } else if (score >= 60) {
+    colorClass = 'bg-amber-50 text-amber-700 border-amber-200';
+  }
   return (
-    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${color}`}>
-      <TrendingUp size={10} />
-      <span>{score.toFixed(0)}% {label}</span>
-    </div>
+    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${colorClass}`}>
+      Alignment Score: {score}
+    </span>
   );
 }
 
@@ -172,7 +173,7 @@ export default function MatchWindow({ status, matches: propMatches, onViewMatch,
                           )}
                         </div>
 
-                        {/* Sector + Geography */}
+                        {/* Sector + Geography + Deal Type */}
                         <div className="flex items-center gap-3 mb-1">
                           <div className="flex items-center gap-1 text-xs text-[#1F2937] font-semibold">
                             <Building2 size={12} className="text-[#6B7280]" />
@@ -184,6 +185,10 @@ export default function MatchWindow({ status, matches: propMatches, onViewMatch,
                               <span>{match.counterparty.geography}</span>
                             </div>
                           )}
+                          <div className="flex items-center gap-1 text-xs text-[#6B7280]">
+                            <span>•</span>
+                            <span className="font-semibold text-gray-700">{match.counterparty.intent.replace('_', ' ').toUpperCase()}</span>
+                          </div>
                         </div>
 
                         {match.counterparty.summary && (

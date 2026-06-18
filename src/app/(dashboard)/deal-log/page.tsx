@@ -76,7 +76,7 @@ export default function DealLogPage() {
        rank: i + 1,
        label: `P${i+1}`,
        proposalId: dbDeal.id,
-       finalScore: parseFloat(m.score) * 100,
+       finalScore: parseFloat(m.score),
        confidenceScore: parseFloat(m.similarity) * 100,
        matchReason: m.reason || 'AI alignment detected.',
        counterparty: { 

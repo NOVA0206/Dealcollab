@@ -1,6 +1,11 @@
 // src/app/api/chat/route.ts
+import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-
+import {
+  normalizeIntent,
+  normalizeSize,
+  qualityTierFromScore,
+} from '@/lib/dataQuality';
 import { processIntelligence } from '@/lib/intelligenceEngine';
 import { normalizeMessage } from '@/lib/normalizeMessage';
 import {
@@ -16,17 +21,15 @@ import {
   detectStructureFromText,
   detectShellQuery,
   detectGatewaySector,
-  updateStateFromExtraction,
-  computeQualityGate,
-  type QualityGateResult,
+  detectIntentFocusFromText,
   type DealIntent,
   type RouterState
 } from '@/lib/promptRouter';
 import { buildFinalMessage } from '@/lib/responseBuilder';
 import { createServerSupabaseClient } from '@/utils/supabase/server';
-import { NextRequest, NextResponse } from 'next/server';
 import { type MatchCard, type MatchmakingResult } from '@/lib/matchmakingEngine';
 import crypto from 'crypto';
+import { resolveCompletion, type Extraction } from '@/lib/resolveCompletion';
 
 /**
  * DealCollab Chat Route
@@ -103,12 +106,20 @@ export async function GET() {
 // ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  if (!process.env.GROQ_API_KEY) {
-    console.error("❌ CRITICAL: Missing GROQ_API_KEY");
-    throw new Error("GROQ_API_KEY not found in runtime");
+  // Phase 0.1 (deploy safety): the app uses OpenAI as the PRIMARY model; Groq is only a
+  // fallback (intelligenceEngine checks each key lazily at call time). Requiring GROQ_API_KEY
+  // here threw on every request for OpenAI-only deployments. Require the primary key instead,
+  // fail gracefully, and treat Groq as optional.
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("❌ CRITICAL: Missing OPENAI_API_KEY (primary model provider)");
+    return NextResponse.json(
+      { success: false, error: "Server is missing OPENAI_API_KEY. Set it in the environment." },
+      { status: 500 },
+    );
   }
-  const apiKey = process.env.GROQ_API_KEY;
-  console.log("KEY EXISTS:", !!apiKey);
+  if (!process.env.GROQ_API_KEY) {
+    console.warn("[ROUTE] GROQ_API_KEY not set — Groq fallback disabled (OpenAI-only mode).");
+  }
 
   // Declared outside try so it's accessible in the catch block
   let updatedState: RouterState = createBlankState();
@@ -216,85 +227,6 @@ export async function POST(req: NextRequest) {
         console.log(
           `[STATE] Phase: ${storedState.phase} | turn: ${storedState.turn_count} | intermediary: ${storedState.is_intermediary} | sub_sector: ${storedState.sub_sector}`,
         );
-
-        if (storedState.is_complete) {
-          console.log("[STATE] Chat session is already COMPLETE. Skipping processing.");
-          
-          let matchCards: MatchCard[] = [];
-          let matchSummary: string | null = null;
-          const resolvedProposalId: string | null = storedState.proposal_id || null;
-          
-          if (resolvedProposalId) {
-            const { data: dbMatches } = await supabase
-              .from('proposal_matches')
-              .select('*')
-              .eq('proposal_id', resolvedProposalId)
-              .order('final_score', { ascending: false });
-            
-            if (dbMatches && dbMatches.length > 0) {
-              const matchedIds = dbMatches.map(m => m.matched_proposal_id);
-              const { data: candidates } = await supabase
-                .from('proposals')
-                .select('id, sectors, geographies, deal_size_min_cr, deal_size_max_cr')
-                .in('id', matchedIds);
-              
-              matchCards = dbMatches.map(row => {
-                const cand = candidates?.find(c => c.id === row.matched_proposal_id);
-                const cMin = cand?.deal_size_min_cr ?? 0;
-                const cMax = cand?.deal_size_max_cr ?? 0;
-                
-                const sizeRange = (() => {
-                  if (!cMin && !cMax) return null;
-                  if (cMin === cMax) return `₹${cMin} Cr`;
-                  if (!cMin) return `Up to ₹${cMax} Cr`;
-                  if (!cMax) return `₹${cMin}+ Cr`;
-                  return `₹${cMin}–${cMax} Cr`;
-                })();
-
-                const getScoreLabel = (score: number) => {
-                  if (score >= 75) return 'High';
-                  if (score >= 55) return 'Good';
-                  return 'Possible';
-                };
-
-                return {
-                  matchedProposalId: row.matched_proposal_id,
-                  sector: cand?.sectors?.[0] ?? null,
-                  geography: cand?.geographies?.[0] ?? null,
-                  sizeRange,
-                  finalScore: row.final_score,
-                  scoreLabel: getScoreLabel(row.final_score),
-                  matchReason: row.match_reason,
-                  archetype: row.match_archetype,
-                };
-              });
-              matchSummary = `${dbMatches.length} aligned counterpart${dbMatches.length > 1 ? 'ies' : 'y'} identified.`;
-            }
-          }
-          
-          const dummyExtraction = {
-            intent: storedState.intent,
-            state: storedState,
-            is_complete: true,
-            message: ""
-          };
-          const finalMessage = buildFinalMessage(dummyExtraction, storedState);
-          
-          return NextResponse.json({
-            success: true,
-            data: JSON.stringify(dummyExtraction),
-            message: finalMessage,
-            is_complete: true,
-            quality_gate_passed: storedState.quality_gate_passed,
-            intent_validated: storedState.intent_validated,
-            chatId: activeChatId,
-            proposalId: resolvedProposalId,
-            type: 'complete',
-            matches: matchCards,
-            matchSummary: matchSummary,
-            is_document_intake: storedState.is_document_intake,
-          });
-        }
       }
     }
 
@@ -379,9 +311,7 @@ export async function POST(req: NextRequest) {
 
     // ─── MATCHMAKING CONTEXT (LLM prompt enrichment only) ─────
     // NOTE: This is for AI context — real matching runs in executeMatchmaking on closure.
-    // Pass null when no context found so LLM gets the neutral "matching is running" message
-    // instead of generating contradictory "no matches found" text (BUG #3 fix).
-    let matchedMandatesStr: string | null = null;
+    let matchedMandatesStr = "No active mandates found in database yet.";
 
     if (storedState.sector || storedState.intent) {
       try {
@@ -421,8 +351,6 @@ export async function POST(req: NextRequest) {
             return `- [${r.intent}] ${r.sectors?.join(", ") || 'General'} | Size: ${size} | Geography: ${geo}`;
           }).join("\n");
           console.log(`[MATCHMAKING] Found ${results.length} context matches.`);
-        } else {
-          console.log('[MATCHMAKING] No context mandates found — LLM will use neutral matching message.');
         }
       } catch (matchErr) {
         console.error("❌ MATCHMAKING CONTEXT FAILED (isolated):", matchErr);
@@ -477,6 +405,10 @@ export async function POST(req: NextRequest) {
       const rv = detectRevenueFromText(fullTextForDetection);
       if (rv) { candidateState.revenue = rv; console.log(`[PRE-DETECT] Revenue: ${rv}`); }
     }
+    if (!candidateState.intent_focus) {
+      const inf = detectIntentFocusFromText(fullTextForDetection);
+      if (inf) { candidateState.intent_focus = inf; candidateState.strategic_intent = inf; console.log(`[PRE-DETECT] Intent Focus: ${inf}`); }
+    }
 
     // ── NM5: Shell query detection ────────────────────────────
     if (!candidateState.is_shell_query) {
@@ -517,7 +449,15 @@ export async function POST(req: NextRequest) {
         (message.includes('₹') && message.includes('Cr') && message.includes('\n'))
       );
 
-      const isDocumentIntake = message.length > 300 && (preDetectedCount >= 3 || hasStructuralSignals);
+      // Phase 3.1: trigger synthesis when a document is actually present, regardless of
+      // how short the typed note is. Previously this only fired on a long TYPED message
+      // (>300 chars), so an uploaded/loaded file plus "here's my mandate" skipped synthesis
+      // entirely. documentText is already populated by the doc-load step above (inline body
+      // OR a documentId loaded from the DB), so it reliably signals an attached document.
+      const documentPresent = documentText.trim().length > 100;
+      const isLongStructuredPaste =
+        message.length > 300 && (preDetectedCount >= 3 || hasStructuralSignals);
+      const isDocumentIntake = documentPresent || isLongStructuredPaste;
 
       if (isDocumentIntake) {
         candidateState.is_document_intake = true;
@@ -570,207 +510,36 @@ export async function POST(req: NextRequest) {
     console.log(`[AI] Processing completed in ${duration.toFixed(1)}s`);
     console.log("🧠 FINAL DATA:", aiContent);
 
-    // ─── STATE UPDATE ─────────────────────────────────────────
-    // Update the router state based on extraction results
-    updatedState = updateStateFromExtraction(
-      storedState,
-      extraction as unknown as { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
+    // ─── STATE UPDATE + COMPLETION (consolidated · wiring) ────────────────────
+    // All completion logic — friction layers, RC8 auto-close, the M4 guard, the
+    // quality gate, and intent validation — now lives in ONE tested function,
+    // resolveCompletion(). It calls updateStateFromExtraction internally and applies
+    // the candidate-state persistence, reproducing the prior inline behaviour PLUS the
+    // Phase 2/3 fixes (negation-aware confirmation incl. "absolutely not", the document
+    // fast-lane, tightened friction). The regression harness covers this function.
+    const completion = resolveCompletion({
+      storedState,            // may already be friction-patched above (layer 2)
+      extraction: extraction as Extraction,
       message,
+      candidateState,
       modulesLoaded,
-    );
+    });
+    updatedState = completion.state;
+    extraction = completion.extraction as typeof extraction;
+    const m4GuardShouldFire = completion.m4GuardFired; // used by the enrichment diagnostic below
 
-    // Persist pre-detected values the LLM may not have re-extracted
-    if (updatedState.is_intermediary === null && candidateState.is_intermediary !== null) {
-      updatedState.is_intermediary = candidateState.is_intermediary;
+    // Phase 8: structured state-transition observability
+    if (!storedState.intent && updatedState.intent) {
+      console.log(`[INTENT_CAPTURED] First intent detection | intent: ${updatedState.intent} | sector: ${updatedState.sector ?? 'unknown'} | turn: ${updatedState.turn_count}`);
     }
-    if (!updatedState.sub_sector && candidateState.sub_sector) {
-      updatedState.sub_sector = candidateState.sub_sector;
-    }
-    if (!updatedState.structure && candidateState.structure) updatedState.structure = candidateState.structure;
-    if (!updatedState.deal_size && candidateState.deal_size) updatedState.deal_size = candidateState.deal_size;
-    if (!updatedState.revenue && candidateState.revenue) updatedState.revenue = candidateState.revenue;
-
-    // Persist NM3/NM5/NM6 state
-    if (candidateState.gateway_clarifier !== null && updatedState.gateway_clarifier === null) {
-      updatedState.gateway_clarifier = candidateState.gateway_clarifier;
-    }
-    if (candidateState.is_document_intake && !updatedState.is_document_intake) {
-      updatedState.is_document_intake = true;
-    }
-    if (candidateState.is_shell_query && !updatedState.is_shell_query) {
-      updatedState.is_shell_query = true;
-    }
-
-    // NM7: Persist quality gate state if set externally
-    if (candidateState.quality_gate_passed && !updatedState.quality_gate_passed) {
-      updatedState.quality_gate_passed = true;
-    }
-    if (candidateState.quality_gate_attempted && !updatedState.quality_gate_attempted) {
-      updatedState.quality_gate_attempted = true;
-    }
-    if (candidateState.intent_validated !== null && updatedState.intent_validated === null) {
-      updatedState.intent_validated = candidateState.intent_validated;
-    }
-
-    // RC3: Friction hard override (layer 3)
-    if (hasFriction) {
-      updatedState.is_complete = true;
-      updatedState.phase = 'CLOSURE';
-      (extraction as Record<string, unknown>).is_complete = true;
-      console.log('[ROUTE] Friction override applied: is_complete=true, phase=CLOSURE');
-    }
-
-    // RC8: 4-turn auto-close
-    if (
-      updatedState.turn_count >= 4 &&
-      (updatedState.intent || updatedState.sector) &&
-      !updatedState.is_complete
-    ) {
-      updatedState.is_complete = true;
-      updatedState.phase = 'CLOSURE';
-      (extraction as Record<string, unknown>).is_complete = true;
-      console.log(`[ROUTE] 4-turn auto-close at turn ${updatedState.turn_count}`);
-    }
-
-    // Phase lock: stay in MOMENTUM unless complete
-    if (storedState.phase === 'MOMENTUM' && updatedState.phase !== 'CLOSURE' && !updatedState.is_complete) {
-      updatedState.phase = 'MOMENTUM';
-      updatedState.is_sufficient = true;
-    }
-
-    // ── Document-intake auto-clear: if stuck in doc-intake mode for 3+ turns ──
-    // without the user confirming, exit doc-intake so M4 can load normally.
-    if (updatedState.is_document_intake && !updatedState.is_complete && updatedState.turn_count > 3) {
-      updatedState.is_document_intake = false;
-      console.log('[ROUTE] Document-intake: auto-cleared after 3 turns without confirmation');
-    }
-
-    // ── M4 Guard: prevent early completion before M4 questions are asked AND answered ──
-    //
-    // Two cases handled:
-    //   A) m4_questions_asked=false: M4 was never asked. Block + patch message.
-    //   B) m4JustAsked: M4 was asked THIS SAME TURN (first time). Block same-turn closure
-    //      so user gets one turn to answer. Message is kept (LLM already asked questions).
-    //
-    // RC3 (friction) bypasses this guard — user explicitly asked to proceed.
-    // quality_gate_passed bypasses this guard — user has confirmed mandate via intent validation.
-    // Gives up at turn 9 to prevent infinite loops.
-
-    // true when M4 questions were asked for the first time in THIS turn's LLM response
-    const m4JustAsked = !storedState.m4_questions_asked && updatedState.m4_questions_asked;
-
-    const m4GuardShouldFire =
-      updatedState.is_complete &&
-      !hasFriction &&
-      !!updatedState.sector &&
-      (!updatedState.m4_questions_asked || m4JustAsked) &&
-      updatedState.turn_count <= 9 &&
-      !updatedState.quality_gate_passed; // BUG #1 fix: don't block after quality gate validated
-
-    console.log('[ROUTE] Current State:', JSON.stringify({
-      phase: updatedState.phase,
-      quality_gate_passed: updatedState.quality_gate_passed,
-      intent_validated: updatedState.intent_validated,
-      is_complete: updatedState.is_complete,
-      m4_questions_asked: updatedState.m4_questions_asked,
-    }));
-    if (updatedState.intent_validated === true) {
-      console.log('[ROUTE] Confirmation Detected: true — user validated mandate');
-    }
-
-    if (m4GuardShouldFire) {
-      updatedState.is_complete = false;
-      updatedState.phase = 'QUALIFICATION';
-
-      // Clear document-intake so M4 loads normally on next turn
-      if (updatedState.is_document_intake) {
-        updatedState.is_document_intake = false;
-        console.log('[ROUTE] M4 guard: document-intake cleared — M4 will load next turn');
-      }
-
-      // Bump round_count so the geo gate (round_count===0) doesn't block M4 next turn
-      if (!updatedState.geography && updatedState.round_count === 0) {
-        updatedState.round_count = 1;
-        console.log('[ROUTE] M4 guard: round_count bumped to bypass geo gate next turn');
-      }
-
-      (extraction as Record<string, unknown>).is_complete = false;
-
-      if (!updatedState.m4_questions_asked) {
-        // Case A: M4 was never asked — LLM wrote a premature closure/summary message.
-        // Replace with a natural bridge so the user isn't confused by a closure that reverts.
-        const sectorLabel = (updatedState.sector || 'target').replace(/_/g, ' ');
-        const bridgeMsg =
-          `Before I finalise this mandate, I need a few sector-specific details ` +
-          `about the ${sectorLabel} target to find the most aligned counterparties.`;
-        (extraction as Record<string, unknown>).message = bridgeMsg;
-        console.log(`[ROUTE] M4 guard (A): message patched — M4 not yet asked, sector=${updatedState.sector}`);
-      } else {
-        // Case B: m4JustAsked — LLM correctly asked M4 questions this turn.
-        // Don't touch the message (it already has M4 questions). Just block same-turn closure.
-        console.log(`[ROUTE] M4 guard (B): m4JustAsked — prevented same-turn completion, turn=${updatedState.turn_count}`);
-      }
-    }
-
-    // STEP A: Server-side intent validation detection
-    // Runs before everything — if user is responding to the intent validation question
-    if (updatedState.quality_gate_passed && updatedState.intent_validated === null) {
-      const lower = message.toLowerCase().trim();
-      const yesSignals = ['yes', 'confirm', 'genuine', 'correct', 'proceed', 'real',
-        'absolutely', 'yes it is', 'yes this is', 'register it',
-        'go ahead', 'activate'];
-      const noSignals = ['no', 'not yet', 'exploring', 'just looking', 'not genuine',
-        'cancel', 'no not yet', 'not real', 'not ready'];
-
-      if (yesSignals.some(p => lower.includes(p))) {
-        updatedState.intent_validated = true;
-        updatedState.is_complete = true;
-        (extraction as Record<string, unknown>).is_complete = true;
-        console.log('[NM7] Intent validated: YES — proceeding to DB insert');
-      } else if (noSignals.some(p => lower.includes(p))) {
-        updatedState.intent_validated = false;
-        updatedState.is_complete = false;
-        console.log('[NM7] Intent validated: NO — soft consequence, no DB insert');
-      }
-    }
-
-    // STEP B: Quality gate evaluation
-    // Fires when is_complete=true but quality gate not yet passed
-    if (updatedState.is_complete && !updatedState.quality_gate_passed &&
-      updatedState.intent_validated !== true) {
-
-      const qualityResult: QualityGateResult = computeQualityGate(updatedState);
-      console.log(`[NM7] Quality gate: score ${qualityResult.score}/10 | passed: ${qualityResult.passed}`);
-
-      if (!qualityResult.passed) {
-        console.log(`[NM7] Gate FAIL — missing: ${qualityResult.missing.join(', ')}`);
-
-        if (updatedState.quality_gate_attempted) {
-          // Second failure — hard close without DB insert
-          // Bot will re-ask via M_quality_gate_fail, but we don't reset round_count again
-          console.log('[NM7] Second gate failure — hard close, no extension');
-          updatedState.is_complete = false;
-          updatedState.quality_gate_passed = false;
-        } else {
-          // First failure — give user one extension
-          updatedState.quality_gate_attempted = true;
-          updatedState.quality_score = qualityResult.score;
-          updatedState.is_complete = false;
-          updatedState.quality_gate_passed = false;
-          updatedState.round_count = 0; // Reset for extension turns
-          console.log('[NM7] First gate failure — extending conversation (round_count reset)');
-        }
-
-      } else {
-        // Gate passes — move to intent validation
-        console.log('[NM7] Gate PASS — awaiting intent validation');
-        updatedState.quality_gate_passed = true;
-        updatedState.quality_score = qualityResult.score;
-        updatedState.is_complete = false; // Not yet — need Yes/No
-        updatedState.intent_validated = null;
-        // Phase resolves to INTENT_VALIDATION in resolvePhase()
-        updatedState.phase = 'INTENT_VALIDATION';
-      }
+    if (updatedState.phase === 'MANDATE_VERIFICATION' && updatedState.verification_step === 'CONFIRMATION' && storedState.phase !== 'MANDATE_VERIFICATION') {
+      console.log(`[MANDATE_STRUCTURED] Quality gate passed — summary shown | score: ${updatedState.quality_score}/10 | intent: ${updatedState.intent} | sector: ${updatedState.sector}`);
+    } else if (updatedState.phase === 'MANDATE_VERIFICATION' && (updatedState.verification_step === 'AUTHORITY' || updatedState.verification_step === 'READINESS') && storedState.verification_step === 'CONFIRMATION') {
+      console.log(`[VERIFICATION_STARTED] User confirmed summary — verification active | step: ${updatedState.verification_step}`);
+    } else if (updatedState.intent_validated === true && updatedState.is_complete) {
+      console.log(`[MATCHMAKING_ACTIVATED] Verification complete — matchmaking firing | intent: ${updatedState.intent} | sector: ${updatedState.sector} | confidence: ${updatedState.mandate_confidence_score ?? 'n/a'}`);
+    } else if (!updatedState.is_complete && updatedState.sector) {
+      console.log(`[MANDATE_UPDATED] Fields updated | intent: ${updatedState.intent ?? 'null'} | sector: ${updatedState.sector} | phase: ${updatedState.phase} | turn: ${updatedState.turn_count}`);
     }
 
     // ─── ENRICHMENT COMPLETENESS DIAGNOSTIC ──────────────────
@@ -813,20 +582,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure extraction.is_complete reflects updatedState.is_complete to prevent premature finalMessage building
-    (extraction as Record<string, unknown>).is_complete = updatedState.is_complete;
-
     // ─── FINAL RESPONSE MESSAGE ──────────────────────────────
-    let finalMessage = buildFinalMessage(extraction, updatedState);
-    
-    const completionDetected = updatedState.is_complete || finalMessage.includes("Your requirement has been structured successfully");
-    if (completionDetected) {
-      console.log("[MATCHMAKING] Completion detected");
-      updatedState.is_complete = true;
-      (extraction as Record<string, unknown>).is_complete = true;
-      finalMessage = buildFinalMessage(extraction, updatedState);
-    }
-    
+    const finalMessage = buildFinalMessage(extraction);
     // Sync the LLM extraction message with the delivered finalMessage to prevent duplicates in history
     extraction.message = finalMessage;
 
@@ -846,7 +603,7 @@ export async function POST(req: NextRequest) {
 
     // ─── CLOSURE BRANCH: DB PERSISTENCE + MATCHMAKING ─────────
     // ─── DEAL PERSISTENCE + MATCHMAKING ──────────────────────
-    const s = extraction.state;
+    const s = updatedState;
     let matchCards: MatchCard[] = [];
     let matchSummary: string | null = null;
     let matchResult: MatchmakingResult | null = null;
@@ -856,17 +613,18 @@ export async function POST(req: NextRequest) {
     const shouldInsert = updatedState.is_complete;
 
     if (shouldInsert) {
-      console.log("[STATE] Deal completed");
+      const qTier = qualityTierFromScore(updatedState.quality_score ?? 0);
       console.log("✅ REQUIREMENT COMPLETE — INSERTING INTO DB AND MATCHING");
+      console.log(`[MANDATE_COMPLETE] Mandate complete. Quality tier: ${qTier}`);
+      console.log(`[NM7] Quality tier: ${qTier} | score: ${updatedState.quality_score ?? 0}/10`);
 
       try {
+        // normalizeSize() replaces ad-hoc parseRange — handles Cr / lakh / USD M / INR M
         const parseRange = (val: string | null) => {
           if (!val) return { min: null, max: null };
-          const rangeMatch = val.match(/(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:\.\d+)?)/i);
-          if (rangeMatch) return { min: rangeMatch[1], max: rangeMatch[2] };
-          const singleMatch = val.match(/~?(\d+(?:\.\d+)?)/);
-          if (singleMatch) return { min: singleMatch[1], max: singleMatch[1] };
-          return { min: null, max: null };
+          const n = normalizeSize(val);
+          if (!n || n.min_cr == null) return { min: null, max: null };
+          return { min: String(n.min_cr), max: String(n.max_cr ?? n.min_cr) };
         };
 
         const resolvedDealSize =
@@ -886,7 +644,7 @@ export async function POST(req: NextRequest) {
             user_id: userId,
             raw_text: message,
             normalised_text: JSON.stringify(extraction),
-            intent: extraction.intent,
+            intent: normalizeIntent(updatedState.intent) ?? updatedState.intent,
             sectors: s.sector ? [s.sector] : [],
             geographies: s.geography ? [s.geography] : [],
             deal_size_min_cr: size.min,
@@ -915,26 +673,29 @@ export async function POST(req: NextRequest) {
         // Deal insert
         await supabase.from("deals").insert([{
           user_id: userId,
-          title: `${extraction.intent}: ${s.sector} deal`,
+          title: `${updatedState.intent}: ${s.sector} deal`,
           sector: s.sector,
           region: s.geography,
           size: s.deal_size || "Undisclosed",
           status: 'live',
         }]);
 
-        console.log("✅ DB INSERT SUCCESSFUL — mandate_id:", mandateData?.id, "| intent_validated: true | intent:", extraction.intent, "| sector:", s.sector, "| geo:", s.geography);
+        console.log("✅ DB INSERT SUCCESSFUL — mandate_id:", mandateData?.id, "| intent_validated: true | intent:", updatedState.intent, "| sector:", s.sector, "| geo:", s.geography);
+        console.log(`[MANDATE_SAVED] Mandate persisted to DB successfully. ID: ${mandateData?.id}`);
 
         // Matchmaking (background task with 12s synchronous race)
-        if (mandateData?.id && extraction.intent) {
-          console.log("[MATCHING] Triggering matching");
+        if (mandateData?.id && updatedState.intent) {
           console.log("[M5] Triggering matchmaking pipeline...");
+          console.log(`[MATCHMAKING_TRIGGERED] Matchmaking pipeline triggered for mandate: ${mandateData.id}`);
+          console.log(`[MATCH_SEARCH_STARTED] Scanning proposal universe | mandate: ${mandateData.id} | intent: ${updatedState.intent} | sector: ${updatedState.sector}`);
+          console.log(`[MANDATE_MONITORING_ACTIVE] Mandate registered for 90-day continuous monitoring | id: ${mandateData.id}`);
           const { executeMatchmaking } = await import('@/lib/matchmakingEngine');
 
           const matchPromise = executeMatchmaking({
             id: proposalId,
             mandateId: mandateData.id,
             userId,
-            intent: extraction.intent,
+            intent: updatedState.intent,
             raw_text: message,
             sector: s.sector ?? null,
             sub_sector: s.sub_sector ?? null,
@@ -958,29 +719,22 @@ export async function POST(req: NextRequest) {
           if (matchResult?.cards?.length) {
             matchCards = matchResult.cards;
             matchSummary = matchResult.summary;
-            console.log("[MATCHING] Matches found");
-            console.log('[ROUTE] Mandate Activated');
-            console.log('[ROUTE] Matching Started');
-            console.log(`[ROUTE] Matches Returned: ${matchResult.matchCount}`);
             console.log(`[M5] ${matchResult.matchCount} match cards. Top score: ${matchResult.topScore}`);
           } else {
-            console.log('[ROUTE] Mandate Activated');
-            console.log('[ROUTE] Matching Started (async — no immediate results within 12s)');
-            console.log('[ROUTE] Matches Returned: 0 (will surface via /api/matches polling)');
             console.log("[M5] No immediate matches — will surface via /api/matches");
           }
 
           // Resolve proposalId for MatchPanel activation.
-          // Fallback immediately to the generated proposalId if the matchmaking search was slow.
-          resolvedProposalId = matchResult?.proposalId ?? proposalId;
-          console.log('[M5] proposalId resolved:', resolvedProposalId);
+          // Since we generate proposalId locally and pass it to executeMatchmaking,
+          // the proposal is guaranteed to use this ID. We resolve it directly to prevent
+          // timeouts/race conditions and trigger the MatchPanel immediately.
+          resolvedProposalId = proposalId;
 
           // Write the authoritative proposalId back into session state so
           // /api/chat/[id] can restore the MatchPanel after navigation/refresh.
-          if (resolvedProposalId) {
-            updatedState.proposal_id = resolvedProposalId;
-            console.log(`[M5] session state.proposal_id set to: ${resolvedProposalId}`);
-          }
+          updatedState.proposal_id = resolvedProposalId;
+          console.log(`[M5] session state.proposal_id set to: ${resolvedProposalId}`);
+          console.log(`[MATCHES_RETURNED] Returning matches to client for proposal: ${resolvedProposalId}`);
         }
 
       } catch (dbErr) {

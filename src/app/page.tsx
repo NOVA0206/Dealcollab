@@ -7,23 +7,20 @@ import { useUser } from '@/components/UserProvider';
 import VideoBackground from '@/components/auth/VideoBackground';
 import VideoLogo from '@/components/auth/VideoLogo';
 import GoogleAuthButton from '@/components/auth/GoogleAuthButton';
-import PhoneVerification from '@/components/auth/PhoneVerification';
+import GmailOTPFlow from '@/components/auth/GmailOTPFlow';
 import AuthStepper from '@/components/auth/AuthStepper';
-import { ShieldCheck, Sparkles, MessageSquare, AlertCircle, Info } from 'lucide-react';
+import { ShieldCheck, Sparkles, AlertCircle, Info } from 'lucide-react';
 
 const AuthContent = () => {
   const searchParams = useSearchParams();
   const { data: session, status } = useSession();
-  const { setOnboarding, onboarding, profile } = useUser();
+  const { profile } = useUser();
   const router = useRouter();
   
-  const source = searchParams.get('source');
-  const phoneFromUrl = searchParams.get('phone');
   const error = searchParams.get('error');
   const logoutSuccess = searchParams.get('logout') === 'success';
-  const isFromWhatsApp = source === 'whatsapp';
-  
-  const [step, setStep] = useState<'google' | 'phone' | 'verified'>('google');
+
+  const [step, setStep] = useState<'google' | 'verified'>('google');
   const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
@@ -56,55 +53,63 @@ const AuthContent = () => {
     }
   }, [isVerified, router]);
 
-  const [whatsappVerifiedPhone, setWhatsappVerifiedPhone] = useState<string | null>(null);
-
-  // 1. Handle WhatsApp Link initialization (Smart Entry)
-  useEffect(() => {
-    if (isFromWhatsApp && phoneFromUrl) {
-      queueMicrotask(() => {
-        setWhatsappVerifiedPhone(phoneFromUrl);
-      });
-      // Store in cookie so auth.ts can read it during Google login
-      document.cookie = `whatsapp_phone=${phoneFromUrl}; path=/; max-age=3600`;
-    }
-  }, [isFromWhatsApp, phoneFromUrl]);
-
-  // 2. State Machine for Auth Steps
+  // 2. Routing state machine — the ONLY routing rule:
+  //   authenticated + phone exists  → /home
+  //   authenticated + no phone      → phone collection step
+  //   unauthenticated               → login form (handled by render)
   useEffect(() => {
     if (!mounted || status !== 'authenticated' || !session?.user) return;
-    
-    // Step 1: Check both session and DB profile for phone
-    // @ts-expect-error - custom property
-    const sessionPhone = session.user.phone;
-    const dbPhone = profile?.phone;
-    const phoneExists = onboarding.phoneVerified || !!sessionPhone || !!dbPhone;
 
-    console.log("Verification Status:", { phoneExists, sessionPhone, dbPhone });
-    
-    if (!phoneExists) {
-      if (step !== 'phone') {
-        Promise.resolve().then(() => setStep('phone'));
-      }
-    } else {
-      // User is verified (Returning or just finished)
-      if (step !== 'verified') {
-        Promise.resolve().then(() => setStep('verified'));
-      }
-      if (!isVerified) {
-        Promise.resolve().then(() => setIsVerified(true));
-      }
+    // Guard: already routing to /home — don't re-evaluate and risk reverting to phone step
+    // while the session update() from PhoneVerification is still in-flight.
+    if (isVerified || step === 'verified') return;
+
+    // @ts-expect-error - phone is injected by the NextAuth session callback from DB
+    const sessionPhone = session.user.phone as string | null | undefined;
+    const dbPhone = profile?.phone ?? null;
+    const hasPhone = !!(sessionPhone || dbPhone);
+
+    console.log('[AUTH ROUTER]', {
+      user: session.user.email,
+      sessionPhone: sessionPhone ?? '(none)',
+      dbPhone: dbPhone ?? '(none)',
+      hasPhone,
+      profileLoaded: profile !== null,
+      step,
+    });
+
+    // Fast path: phone is already in the session (populated from DB by session callback).
+    // Route to /home immediately — no need to wait for the profile API call.
+    if (sessionPhone) {
+      console.log('[AUTH] ✓ Phone in session → /home');
+      setStep('verified');
+      setIsVerified(true);
+      return;
     }
-  }, [mounted, status, session, profile, onboarding.phoneVerified, step, isVerified]);
+
+    // Session has no phone — wait briefly for the profile fetch to complete
+    // (covers the edge case where phone exists in DB but session wasn't refreshed yet).
+    if (profile === null) {
+      console.log('[AUTH] No session phone; awaiting profile load...');
+      return;
+    }
+
+    // Profile loaded — check it for a phone
+    if (hasPhone) {
+      console.log('[AUTH] ✓ Phone in profile → /home');
+      setStep('verified');
+      setIsVerified(true);
+      return;
+    }
+
+    // No phone → dedicated phone-collection page
+    console.log('[AUTH] No phone found → /save-phone-number');
+    router.push('/save-phone-number');
+  }, [mounted, status, session, profile, step, isVerified, router]);
 
   const handleGoogleSignIn = () => {
     setIsLoading(true);
     signIn('google');
-  };
-
-  const handlePhoneSuccess = () => {
-    setOnboarding('phoneVerified', true);
-    setStep('verified');
-    setIsVerified(true);
   };
 
   return (
@@ -129,10 +134,10 @@ const AuthContent = () => {
           {/* Top Progress Bar */}
           {step !== 'verified' && (
             <div className="mb-8">
-              <AuthStepper 
-                currentStep={step === 'google' ? 1 : 2} 
-                totalSteps={2} 
-                label={isFromWhatsApp ? "Verified Onboarding" : "Identity Setup"}
+              <AuthStepper
+                currentStep={1}
+                totalSteps={1}
+                label="Identity Setup"
               />
             </div>
           )}
@@ -161,7 +166,17 @@ const AuthContent = () => {
           )}
 
           {/* Step 1: Google Authentication */}
-          {step === 'google' && (
+          {/* During 'loading' AND 'authenticated' show a spinner — never flash the login form to a signed-in user */}
+          {step === 'google' && (status === 'loading' || status === 'authenticated') && (
+            <div className="flex flex-col items-center justify-center py-10 gap-4">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                {(() => { console.log('[AUTH] step=google status=' + status + ' — spinner'); return null; })()}
+                {status === 'authenticated' ? 'Verifying Session...' : 'Securing Connection...'}
+              </p>
+            </div>
+          )}
+          {step === 'google' && status === 'unauthenticated' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <div className="space-y-2 text-center pb-2">
                 <h2 className="text-2xl font-black text-foreground tracking-tight italic">
@@ -172,29 +187,20 @@ const AuthContent = () => {
                 </p>
               </div>
 
-              {/* WhatsApp Smart Entry Badge */}
-              {isFromWhatsApp && whatsappVerifiedPhone && (
-                <div className="bg-primary/5 border border-primary/10 p-4 rounded-2xl flex items-center gap-4 mb-6 animate-in fade-in zoom-in duration-700 ring-1 ring-primary/20">
-                  <div className="bg-primary text-white p-2 rounded-xl shadow-lg shadow-primary/30">
-                    <MessageSquare size={16} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black text-primary-hover uppercase tracking-widest leading-none mb-1.5">
-                      Verified Trust Layer
-                    </p>
-                    <p className="text-xs font-bold text-brand-secondary">
-                      Welcome back — identified via WhatsApp
-                    </p>
-                  </div>
-                </div>
-              )}
-
               <div className="space-y-4">
-                <GoogleAuthButton 
-                  onClick={handleGoogleSignIn} 
-                  isLoading={isLoading} 
+                <GoogleAuthButton
+                  onClick={handleGoogleSignIn}
+                  isLoading={isLoading}
                 />
-                
+
+                <div className="relative flex items-center gap-3 py-1">
+                  <div className="flex-1 h-px bg-gray-100" />
+                  <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">or</span>
+                  <div className="flex-1 h-px bg-gray-100" />
+                </div>
+
+                <GmailOTPFlow />
+
                 <p className="text-[10px] text-center text-gray-300 font-bold uppercase tracking-[0.2em] pt-2">
                   Secured by Google Identity
                 </p>
@@ -205,24 +211,14 @@ const AuthContent = () => {
                   <Info size={12} className="text-primary-hover" />
                   <p className="text-[10px] font-medium italic">Private Beta Access Only</p>
                 </div>
-                <a 
-                  href="mailto:support@dealcollab.in" 
+                <a
+                  href="mailto:support@dealcollab.in"
                   className="text-[10px] font-bold text-brand-secondary hover:text-primary-hover transition-colors underline decoration-border underline-offset-4"
                 >
                   Contact Membership Support
                 </a>
               </div>
             </div>
-          )}
-
-          {/* Step 2: Phone Verification */}
-          {step === 'phone' && (
-            <PhoneVerification 
-              onVerify={handlePhoneSuccess}
-              onBack={() => setStep('google')}
-              initialPhone={whatsappVerifiedPhone}
-              isFromWhatsApp={isFromWhatsApp}
-            />
           )}
 
           {/* Success State */}

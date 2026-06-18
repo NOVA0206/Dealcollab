@@ -127,7 +127,7 @@ async function main() {
     matches.forEach((m, i) => {
         const cp = cpMap.get(m.matched_proposal_id);
         const rank = i < 3 ? `P${i + 1}` : `#${i + 1}`;
-        console.log(`\n  ${rank} · ${m.match_archetype} · ${(Number(m.final_score) * 100).toFixed(0)}%  (cos ${(Number(m.similarity_score) * 100).toFixed(0)}%)`);
+        console.log(`\n  ${rank} · ${m.match_archetype} · ${Number(m.final_score).toFixed(0)}%  (cos ${(Number(m.similarity_score) * 100).toFixed(0)}%)`);
         console.log(`     Sectors:   ${cp?.sectors?.join(', ') || 'none'}`);
         console.log(`     Geography: ${cp?.geographies?.join(', ') || 'none'}`);
         console.log(`     Size:      ${cp?.deal_size_min_cr || '?'}-${cp?.deal_size_max_cr || '?'} Cr`);

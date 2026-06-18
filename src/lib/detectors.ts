@@ -1,3 +1,21 @@
+/**
+ * DealCollab — Detection Layer
+ * =============================
+ * Layer 2: Text pattern matching. Pure functions. No side effects.
+ * Input: raw text string. Output: detected value or null.
+ *
+ * Owned by this file:
+ *   ✔ SECTOR_KEYWORDS, INTENT_KEYWORDS, PROFILE_INTENT_KEYWORDS
+ *   ✔ FRICTION_SIGNALS
+ *   ✔ VALID_SECTOR_KEYS
+ *   ✔ All detect*() exported functions
+ *
+ * NOT owned:
+ *   ✘ State mutation         → stateManager.ts
+ *   ✘ Quality scoring        → qualityGate.ts
+ *   ✘ Prompt content         → M0–M7 files
+ */
+
 import { normalizeSize } from './dataQuality';
 import type { DealIntent, SectorKey } from './types';
 
@@ -170,19 +188,25 @@ const PROFILE_INTENT_KEYWORDS = [
 ];
 
 // RC3: Friction signals expanded to 30+ patterns
+// Phase 2.6: tightened. Removed ambiguous adverbials and goal-describing verbs that
+// fire mid-sentence while the user is still ANSWERING — "for now", "at this stage",
+// "move forward", "move on", bare "finalize/finalise", "doesn't matter", bare "no data",
+// "work with this", "continue with this", "proceed with what", "i prefer any", "any will do".
+// Kept: explicit "I'm done / can't give more / proceed / submit / close" phrases.
+// (When friction DOES fire, the quality gate still asks for any missing critical field
+//  before completing, so tightening here cannot push a thin mandate through.)
 const FRICTION_SIGNALS = [
-    'no data', 'no more data', "don't have", 'dont have', 'no further',
+    'no more data', "don't have", 'dont have', 'no further',
     'accept as is', 'accept my proposal', 'proceed with this', 'proceed as is',
     "that's all", 'thats all', 'nothing more', 'no more information',
-    'move forward', 'go ahead', 'just proceed', 'move on',
+    'go ahead', 'just proceed',
     'this is enough', 'enough information', 'i have given', 'i have gave',
     'i can only give', 'only this information', 'proceed it', 'submit my deal',
     'go ahead and submit', 'please proceed', 'please go ahead',
-    'that is all', 'this is all', 'continue with this', 'work with this',
-    'accept and continue', 'proceed with what', 'i prefer any',
-    'any will do', 'doesnt matter', "doesn't matter",
-    'at this stage', 'for now', 'submit this', 'save this', 'capture this',
-    'proceed for now', 'close this', 'finalize', 'finalise',
+    'that is all', 'this is all',
+    'accept and continue',
+    'submit this', 'save this', 'capture this',
+    'proceed for now', 'close this', 'finalize this', 'finalise this',
     'this is sufficient', 'sufficient information',
 ];
 
@@ -190,13 +214,25 @@ const FRICTION_SIGNALS = [
 // DETECTION FUNCTIONS — all exported, all pure
 // ─────────────────────────────────────────────────────────────
 
+// Phase 2.4: match a sector keyword on word boundaries instead of a naive substring,
+// so word fragments stop triggering false sectors — 'app' inside "apparel", or the
+// SaaS metric 'arr' inside "arrangements" / "carried". Short acronym-like keywords
+// (≤4 chars, no spaces) must appear as WHOLE words (a trailing plural "s" is allowed);
+// longer keywords still match as a word-initial stem, so 'manufactur' keeps matching
+// "manufacturing".
+function sectorKeywordMatches(text: string, keyword: string): boolean {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const right = keyword.length <= 4 && !keyword.includes(' ') ? 's?\\b' : '';
+    return new RegExp(`\\b${escaped}${right}`, 'i').test(text);
+}
+
 export function detectSectorFromText(text: string): SectorKey | null {
     const lower = text.toLowerCase();
     let bestKey: SectorKey | null = null;
     let bestScore = 0;
     for (const [key, keywords] of Object.entries(SECTOR_KEYWORDS) as [SectorKey, string[]][]) {
         if (key === 'mixed') continue;
-        const score = keywords.filter(kw => lower.includes(kw)).length;
+        const score = keywords.filter(kw => sectorKeywordMatches(lower, kw)).length;
         if (score > bestScore) { bestScore = score; bestKey = key as SectorKey; }
     }
     if (bestScore > 0) console.log(`[DETECTOR] Sector scored: ${bestKey} (score: ${bestScore})`);
@@ -222,6 +258,32 @@ export function detectProfileIntentFromText(text: string): boolean {
 // RC3: Friction detection
 export function detectFrictionSignal(text: string): boolean {
     return FRICTION_SIGNALS.some(sig => text.toLowerCase().includes(sig));
+}
+
+// Phase 2.5 / 3.2: ONE confirmation detector, shared by intent-validation AND document
+// synthesis. Order: an unmistakable "no"/"wrong" in the text wins (overrides the AI's
+// answer); else trust the AI's structured field; else look for an explicit affirmative.
+// Word boundaries stop 'no' matching inside "technology" and 'absolutely' firing on
+// "absolutely not".
+export type Confirmation = 'yes' | 'no' | null;
+
+export function detectConfirmation(message: string, aiField?: string | null): Confirmation {
+    const t = message.toLowerCase().trim();
+
+    const saysNo =
+        /\bnot\b|\bno\b|\bnope\b|\bnever\b|\bcancel\b|\bnegative\b|\bexploring\b|\bjust looking\b|\bwrong\b|\bchange\b|\bmodif\w*/i.test(t) ||
+        /n['’]t\b/i.test(t); // don't / isn't / won't / aren't
+    if (saysNo) return 'no';
+
+    const ai = (aiField ?? '').toLowerCase();
+    if (ai === 'yes') return 'yes';
+    if (ai === 'no') return 'no';
+
+    const saysYes =
+        /\byes\b|\byeah\b|\byep\b|\bconfirm\w*|\bgenuine\b|\bcorrect\b|\baccurate\b|\bproceed\b|\bgo ahead\b|\bactivate\b|\bregister\b|\babsolutely\b|\bsure\b|\baffirmative\b|\bit is\b|\breal\b|\bright\b|\blooks good\b|\blooks right\b|\bapproved?\b/i.test(t);
+    if (saysYes) return 'yes';
+
+    return null;
 }
 
 // RC1: Intermediary detection — semantic patterns, not just explicit phrases
@@ -299,8 +361,39 @@ export function detectStructureFromText(text: string): string | null {
     return null;
 }
 
+// Pre-detect strategic rationale (intent focus) from text
+export function detectIntentFocusFromText(text: string): string | null {
+    const lower = text.toLowerCase();
+    if (lower.includes('geograph') || lower.includes('geo expansion') || lower.includes('expand geo')) {
+        return 'Geographical expansion';
+    }
+    if (lower.includes('vertical integration') || lower.includes('backward integration') || lower.includes('forward integration')) {
+        return 'Vertical integration';
+    }
+    if (lower.includes('technology acquisition') || lower.includes('acquire tech') || lower.includes('acquiring tech')) {
+        return 'Technology acquisition';
+    }
+    if (lower.includes('market expansion') || lower.includes('market entry') || lower.includes('new market')) {
+        return 'Market expansion';
+    }
+    if (lower.includes('diversification') || lower.includes('diversify')) {
+        return 'Diversification';
+    }
+    return null;
+}
+
 // RC2: Pre-detect deal size using normalizeSize
 export function detectDealSizeFromText(text: string): string | null {
+    // Phase 2.1: require a money cue before trusting a number as a deal size.
+    // Without this, normalizeSize defaults bare numbers to Crores, so "250 employees"
+    // → ₹250 Cr and "12 trucks" → ₹12 Cr. Cue = a currency marker anywhere, OR a
+    // magnitude unit (cr/lakh/mn/bn/...) sitting next to a digit. Mirrors the money-cue
+    // guard that detectRevenueFromText already has.
+    const hasMoneyCue =
+        /₹|\$|€|£|\b(?:rs|inr|usd|eur|gbp)\b/i.test(text) ||
+        /\d\s*(?:cr\b|crores?\b|lakhs?\b|lacs?\b|mn\b|million\b|bn\b|billion\b)/i.test(text);
+    if (!hasMoneyCue) return null;
+
     const n = normalizeSize(text);
     if (!n || n.min_cr == null) return null;
     if (n.min_cr === n.max_cr) return `₹${n.min_cr} Cr`;
@@ -331,6 +424,50 @@ export function detectShellQuery(text: string): boolean {
     const score = shellQuerySignals.filter(s => lower.includes(s)).length;
     if (score > 0) console.log(`[DETECTOR] Shell query signals: ${score}`);
     return score >= 1;
+}
+
+// ─────────────────────────────────────────────────────────────
+// NM8: MANDATE VERIFICATION DETECTORS
+// All three are pure pattern-match functions — no state side effects.
+// ─────────────────────────────────────────────────────────────
+
+// Maps user reply to a canonical authority code.
+// Accepts numbered selection (1–8) OR keyword description.
+export function detectVerificationAuthority(text: string): string | null {
+    const t = text.toLowerCase();
+    if (/\b(8|just exploring|just looking|exploring opportunities?|not sure yet)\b/.test(t)) return 'EXPLORING_OPPORTUNITIES';
+    if (/\b(1|founder|promoter)\b/.test(t)) return 'FOUNDER_PROMOTER';
+    if (/\b(2|owner|shareholder|proprietor)\b/.test(t)) return 'OWNER_SHAREHOLDER';
+    if (/\b(3|board member|board director)\b/.test(t) || /\b3\b/.test(t) && /\bboard\b/.test(t)) return 'BOARD_MEMBER';
+    if (/\b(4|corp(?:orate)? dev(?:elopment)?|corp dev)\b/.test(t)) return 'CORP_DEV_TEAM';
+    if (/\b(5|investment bank(?:er)?|banker|ib|advisor|adviser|ca\b)\b/.test(t)) return 'INVESTMENT_BANKER_ADVISOR';
+    if (/\b(6|pe fund|pe firm|private equity|vc fund|vc firm|venture capital|family office|gp\b)\b/.test(t)) return 'PE_VC_REPRESENTATIVE';
+    if (/\b(7|authoris(?:ed|ing)|authorized|mandate holder)\b/.test(t)) return 'AUTHORIZED_MANDATE_HOLDER';
+    return null;
+}
+
+// Maps user reply to a canonical readiness code.
+export function detectVerificationReadiness(text: string): string | null {
+    const t = text.toLowerCase();
+    if (/\b(4|exploring|no timeline|not sure|just looking)\b/.test(t)) return 'EXPLORING_ONLY';
+    if (/\b(1|immediately|right now|right away|asap|now|active now|ready now)\b/.test(t)) return 'IMMEDIATELY';
+    if (/\b(2|30 days?|thirty days?|this month|next month|within a month|within the month)\b/.test(t)) return 'WITHIN_30_DAYS';
+    if (/\b(3|90 days?|ninety days?|quarter|3 months?|three months?|q[1-4]\b)\b/.test(t)) return 'WITHIN_90_DAYS';
+    return null;
+}
+
+// Maps user reply to an array of canonical material codes.
+// Returns ['NONE_AVAILABLE'] when user indicates no materials.
+export function detectVerificationMaterials(text: string): string[] {
+    const t = text.toLowerCase();
+    if (/\b(6|none|no|nothing|not yet|n\/a|not available|don[''']?t have)\b/.test(t)) return ['NONE_AVAILABLE'];
+    const mats: string[] = [];
+    if (/\b(cim|confidential information|info memo)\b/.test(t) || /\b1\b/.test(t)) mats.push('CIM');
+    if (/\bteaser\b/.test(t) || /\b2\b/.test(t)) mats.push('TEASER');
+    if (/\b(financial summary|financials?|f(?:inancial)? model)\b/.test(t) || /\b3\b/.test(t)) mats.push('FINANCIAL_SUMMARY');
+    if (/\b(investment memo|acquisition thesis|thesis|im\b)\b/.test(t) || /\b4\b/.test(t)) mats.push('INVESTMENT_MEMO');
+    if (/\b(board approval|board resolution|board approved|board auth)\b/.test(t) || /\b5\b/.test(t)) mats.push('BOARD_APPROVAL');
+    return mats.length > 0 ? mats : ['NONE_AVAILABLE'];
 }
 
 // NM3: Gateway sector — catches ambiguous signals needing ONE clarifier

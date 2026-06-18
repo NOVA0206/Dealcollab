@@ -1,3 +1,22 @@
+/**
+ * DealCollab — State Manager
+ * ===========================
+ * Layer 3: State CRUD + phase resolution. Pure functions.
+ * Reads detection results and extraction outputs to produce new state.
+ *
+ * Owned by this file:
+ *   ✔ createBlankState()
+ *   ✔ updateStateFromExtraction()
+ *   ✔ initializeStateFromDocument()
+ *   ✔ resolvePhase()
+ *   ✔ computeMissingM3Fields()
+ *
+ * NOT owned:
+ *   ✘ Text detection          → detectors.ts
+ *   ✘ Quality scoring         → qualityGate.ts
+ *   ✘ Prompt construction     → promptRouter.ts
+ */
+
 import type { RouterState, DealIntent, SectorKey, ConversationPhase } from './types';
 import { VALID_SECTOR_KEYS } from './detectors';
 import {
@@ -8,6 +27,8 @@ import {
     detectShellCompanyFromText,
     detectFrictionSignal,
     detectStructureFromText,
+    detectConfirmation,
+    detectIntentFocusFromText,
 } from './detectors';
 
 // ─────────────────────────────────────────────────────────────
@@ -43,6 +64,13 @@ export function createBlankState(): RouterState {
         round_count: 0,
         special_conditions: [],
         strategic_intent: null,
+        // NM8: Mandate Verification Framework
+        verification_step: null,
+        verification_authority: null,
+        verification_readiness: null,
+        verification_materials: null,
+        mandate_confidence_score: null,
+        mandate_confidence_tier: null,
     };
 }
 
@@ -164,6 +192,16 @@ export function updateStateFromExtraction(
         const detected = detectIntentFromText(currentMessage);
         if (detected) updated.intent = detected;
     }
+    if (!updated.intent_focus) {
+        const detected = detectIntentFocusFromText(currentMessage);
+        if (detected) {
+            updated.intent_focus = detected;
+            updated.strategic_intent = detected;
+            console.log(`[DETECTOR] Strategic rationale detected: ${detected}`);
+        }
+    }
+
+    console.log(`[MANDATE_UPDATED] Mandate state updated on turn ${updated.turn_count}.`);
 
     // RC9: Shell company → set sub_sector
     if (updated.sub_sector === null && detectShellCompanyFromText(currentMessage)) {
@@ -192,15 +230,11 @@ export function updateStateFromExtraction(
         console.log('[STATE] Gateway clarifier cleared — user responded');
     }
 
-    // NM6: Document intake confirmation detection
-    if (current.is_document_intake && !updated.is_complete) {
-        const confirmSignals = ['yes', 'correct', 'accurate', 'proceed', 'looks good',
-            'that is right', 'confirmed', 'right', 'go ahead', "that's right"];
-        if (confirmSignals.some(s => currentMessage.toLowerCase().trim().includes(s))) {
-            updated.is_complete = true;
-            console.log('[STATE] Document intake confirmed — is_complete=true');
-        }
-    }
+    // NM6 / Phase 3.2: detect document confirmation with the shared negation-aware
+    // detector. Decided here but APPLIED in the completion block below, so it is no
+    // longer clobbered by the friction else-branch (the old bug where "yes" did nothing).
+    const documentConfirmed =
+        !!current.is_document_intake && detectConfirmation(currentMessage) === 'yes';
 
     // Sufficiency calculation
     const hasIndustrySignal = !!(updated.sector || updated.sub_sector);
@@ -219,16 +253,26 @@ export function updateStateFromExtraction(
     const isFrictionSignal = detectFrictionSignal(currentMessage);
     const meetsMinimumFrictionGuard = updated.intent && hasIndustrySignal && qualifyingFieldsCount >= 1;
 
-    if (current.is_complete) {
-        updated.is_complete = true;
-    } else if (isFrictionSignal && meetsMinimumFrictionGuard) {
+    if (isFrictionSignal && meetsMinimumFrictionGuard) {
         updated.is_complete = true;
         console.log('[STATE] Friction — forcing is_complete=true (Guard: PASS)');
     } else if (isFrictionSignal) {
         console.warn('[STATE] Friction signal ignored — minimum fields not met.');
         updated.is_complete = false;
+    } else if (documentConfirmed) {
+        updated.is_complete = true; // Phase 3.2: a confirmed document completes (no longer clobbered)
+        console.log('[STATE] Document confirmed — is_complete=true');
     } else {
         updated.is_complete = extraction.is_complete;
+    }
+
+    // Phase 1: auto-mark M4 when user provided rich sector intel upfront (≥2 non-trivial fields)
+    // Prevents blocking users who answer M4 questions before being asked them.
+    const richM4FieldCount = Object.values(updated.industry_data || {})
+      .filter(v => typeof v === 'string' && (v as string).trim().length > 3).length;
+    if (richM4FieldCount >= 2 && !updated.m4_questions_asked) {
+      updated.m4_questions_asked = true;
+      console.log(`[STATE] Rich industry_data (${richM4FieldCount} fields) — auto-marking m4_questions_asked=true`);
     }
 
     // Sufficiency gate — sub_sector only required for healthcare sector
@@ -244,7 +288,7 @@ export function updateStateFromExtraction(
     const nextPhase = resolvePhase(updated);
     const PHASE_ORDER_VAL: Record<ConversationPhase, number> = {
         ENTRY: 1, QUALIFICATION: 2, MOMENTUM: 3,
-        INTENT_VALIDATION: 4, CLOSURE: 5, MATCHING: 6, PROFILE_SEARCH: 7,
+        INTENT_VALIDATION: 4, MANDATE_VERIFICATION: 4, CLOSURE: 5, MATCHING: 6, PROFILE_SEARCH: 7,
     };
 
     if (PHASE_ORDER_VAL[nextPhase] >= PHASE_ORDER_VAL[current.phase]) {
@@ -254,23 +298,10 @@ export function updateStateFromExtraction(
         updated.phase = current.phase;
     }
 
-    // NM7: Intent validation yes/no detection (belt-and-suspenders — primary is in route.ts)
-    if (updated.quality_gate_passed && updated.intent_validated === null) {
-        const lower = currentMessage.toLowerCase().trim();
-        const yesSignals = ['yes', 'confirm', 'genuine', 'correct', 'proceed', 'real',
-            'absolutely', 'yes it is', 'yes this is'];
-        const noSignals = ['no', 'not yet', 'exploring', 'just looking', 'not genuine',
-            'cancel', 'no not yet'];
-        if (yesSignals.some(s => lower.includes(s))) {
-            updated.intent_validated = true;
-            updated.is_complete = true;
-            console.log('[STATE] Intent validated: YES');
-        } else if (noSignals.some(s => lower.includes(s))) {
-            updated.intent_validated = false;
-            updated.is_complete = false;
-            console.log('[STATE] Intent validated: NO');
-        }
-    }
+    // NM7 / Phase 2.5: intent-validation yes/no detection now lives in ONE place —
+    // resolveCompletion's confirmation resolver (negation-aware, AI-field-primary).
+    // Removed from here to kill the duplicated, yes-first/substring logic that read
+    // "absolutely not" as a yes.
 
     // Persist quality gate state from candidateState (set by route.ts pre-detection)
     if ((current as RouterState & { quality_gate_passed?: boolean }).quality_gate_passed === true &&
@@ -291,142 +322,70 @@ export function updateStateFromExtraction(
 
 export function initializeStateFromDocument(structuredData: Record<string, unknown>): RouterState {
     const state = createBlankState();
-    
-    // Helper utilities
-    const _docStr = (v: unknown): string => (typeof v === 'string' ? v : '');
-    const _docArr = (v: unknown): string[] =>
-        Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    const intent = structuredData.intent as DealIntent ?? null;
+    const sectorStr = structuredData.sector as string ?? '';
+    const location = structuredData.geography as string ?? structuredData.location as string ?? '';
 
-    // Normalize intent
-    const intent = (structuredData.intent || structuredData.deal_type) as string ?? null;
-    if (intent) {
-        const norm = intent.toUpperCase().replace(/[-\s]/g, '_');
-        if (['SELL_SIDE', 'BUY_SIDE', 'FUNDRAISING', 'DEBT', 'STRATEGIC_PARTNERSHIP'].includes(norm)) {
-            state.intent = norm as DealIntent;
-        }
-    }
-
-    // Normalize sector
-    const sectorStr = (structuredData.sector || structuredData.industry) as string ?? '';
+    if (intent) state.intent = intent;
     if (sectorStr) {
         const raw = sectorStr.toLowerCase().trim();
         const validKey = VALID_SECTOR_KEYS.find(k => k === raw);
         state.sector = validKey || detectSectorFromText(sectorStr);
     }
+    if (location) state.geography = location;
+    if (structuredData.sub_sector) state.sub_sector = String(structuredData.sub_sector);
+    if (structuredData.deal_size) state.deal_size = String(structuredData.deal_size);
+    if (structuredData.revenue) state.revenue = String(structuredData.revenue);
+    if (structuredData.structure) state.structure = String(structuredData.structure);
+    if (structuredData.company_overview) {
+        state.industry_data = { ...state.industry_data, company_overview: structuredData.company_overview };
+    }
 
-    // Fallback sector detection from industry field if sector is still null
+    // Helper utilities
+    const _docStr = (v: unknown): string => (typeof v === 'string' ? v : '');
+    const _docArr = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+    // Fallback sector detection from industry field
     if (!state.sector && structuredData.industry) {
         state.sector = detectSectorFromText(_docStr(structuredData.industry));
     }
 
-    // Normalize location / geography
-    const location = (structuredData.geography || structuredData.location) as string ?? '';
-    if (location) state.geography = location;
+    // Map document intelligence fields into industry_data
+    const docProducts = _docArr(structuredData.products_services);
+    if (docProducts.length > 0)
+        state.industry_data = { ...state.industry_data, products_services: docProducts.slice(0, 6).join(', ') };
 
-    // Normalize subsector / sub_sector
-    const subSector = (structuredData.subsector || structuredData.sub_sector) as string ?? '';
-    if (subSector) state.sub_sector = subSector;
+    const docCapabilities = _docArr(structuredData.capabilities);
+    if (docCapabilities.length > 0)
+        state.industry_data = { ...state.industry_data, capabilities: docCapabilities.slice(0, 5).join(', ') };
 
-    // Normalize deal_size / deal_value
-    const dealSize = (structuredData.deal_value || structuredData.deal_size) as string ?? '';
-    if (dealSize) state.deal_size = dealSize;
+    const docMarketPos = _docStr(structuredData.market_position);
+    if (docMarketPos)
+        state.industry_data = { ...state.industry_data, market_position: docMarketPos.slice(0, 120) };
 
-    // Normalize revenue / revenue_range
-    const revenue = (structuredData.revenue || structuredData.revenue_range) as string ?? '';
-    if (revenue) state.revenue = revenue;
+    const docCerts = _docArr(structuredData.certifications);
+    if (docCerts.length > 0)
+        state.industry_data = { ...state.industry_data, certifications: docCerts.join(', ') };
 
-    // Normalize structure / transaction_type
-    if (structuredData.structure) {
-        state.structure = String(structuredData.structure);
-    } else if (structuredData.transaction_type) {
+    // Map transaction_type → structure
+    if (!state.structure && structuredData.transaction_type) {
         const txStr = _docStr(structuredData.transaction_type);
         const detectedStruct = detectStructureFromText(txStr);
-        state.structure = detectedStruct || txStr;
+        if (detectedStruct) {
+            state.structure = detectedStruct;
+        } else if (txStr) {
+            state.industry_data = { ...state.industry_data, transaction_type: txStr.slice(0, 80) };
+        }
     }
 
-    // Populate company_overview
-    if (structuredData.company_overview) {
-        state.industry_data.company_overview = _docStr(structuredData.company_overview);
-    }
-
-    // Extract core industry intelligence fields
-    const cap = _docStr(structuredData.capacity);
-    const prod = _docStr(structuredData.production);
-    const util = _docStr(structuredData.utilization);
-    const custs = _docArr(structuredData.customers);
-    const certs = _docArr(structuredData.certifications);
-    const assets = _docArr(structuredData.strategic_assets);
-    const ebitda = _docStr(structuredData.ebitda);
-
-    // Save under generic keys
-    if (cap) state.industry_data.capacity = cap;
-    if (prod) state.industry_data.production = prod;
-    if (util) state.industry_data.utilization = util;
-    if (custs.length > 0) state.industry_data.customers = custs.join(', ');
-    if (certs.length > 0) state.industry_data.certifications = certs.join(', ');
-    if (assets.length > 0) state.industry_data.strategic_assets = assets.join(', ');
-    if (ebitda) state.industry_data.ebitda = ebitda;
-
-    // Map doc products and capabilities if present
-    const docProducts = _docArr(structuredData.products_services);
-    if (docProducts.length > 0) {
-        state.industry_data.products_services = docProducts.slice(0, 6).join(', ');
-    }
-    const docCapabilities = _docArr(structuredData.capabilities);
-    if (docCapabilities.length > 0) {
-        state.industry_data.capabilities = docCapabilities.slice(0, 5).join(', ');
-    }
-    const docMarketPos = _docStr(structuredData.market_position);
-    if (docMarketPos) {
-        state.industry_data.market_position = docMarketPos.slice(0, 120);
-    }
     const docCompAdv = _docArr(structuredData.competitive_advantages);
-    if (docCompAdv.length > 0) {
-        state.industry_data.competitive_advantages = docCompAdv.slice(0, 4).join(', ');
-    }
+    if (docCompAdv.length > 0)
+        state.industry_data = { ...state.industry_data, competitive_advantages: docCompAdv.slice(0, 4).join(', ') };
+
     const docGrowthDrivers = _docArr(structuredData.growth_drivers);
-    if (docGrowthDrivers.length > 0) {
-        state.industry_data.growth_drivers = docGrowthDrivers.slice(0, 4).join(', ');
-    }
-
-    // Map sector-specific M4 keys
-    if (state.sector === 'manufacturing') {
-        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
-        if (certs.length > 0) state.industry_data.certifications = certs.join(', ');
-        
-        let capUtilStr = '';
-        if (cap) capUtilStr += `Capacity: ${cap}`;
-        if (prod) capUtilStr += `${capUtilStr ? ', ' : ''}${prod} production`;
-        if (util) capUtilStr += ` (${util} utilization)`;
-        if (capUtilStr) state.industry_data.capacity_utilisation = capUtilStr;
-
-        if (custs.length > 0) state.industry_data.client_concentration = custs.join(', ');
-    } else if (state.sector === 'renewable') {
-        if (structuredData.asset_type) state.industry_data.asset_type = String(structuredData.asset_type);
-        if (structuredData.operational_status) state.industry_data.operational_status = String(structuredData.operational_status);
-        if (cap) state.industry_data.capacity_mw = cap;
-        if (custs.length > 0) state.industry_data.ppa_off_taker = custs.join(', ');
-    } else if (state.sector === 'pharma') {
-        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
-        if (certs.length > 0) state.industry_data.regulatory_approvals = certs.join(', ');
-        if (cap) state.industry_data.manufacturing_capacity = cap;
-    } else if (state.sector === 'defence') {
-        if (certs.length > 0) state.industry_data.certifications_approvals = certs.join(', ');
-        if (custs.length > 0) state.industry_data.government_oem_exposure = custs.join(', ');
-    } else if (state.sector === 'healthcare') {
-        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
-        if (certs.length > 0) state.industry_data.accreditations = certs.join(', ');
-        if (cap) state.industry_data.scale_indicator = cap;
-    } else if (state.sector === 'saas') {
-        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
-        if (custs.length > 0) state.industry_data.client_profile = custs.join(', ');
-    } else if (state.sector === 'education') {
-        if (state.sub_sector) state.industry_data.sub_type = state.sub_sector;
-        if (certs.length > 0) state.industry_data.accreditations = certs.join(', ');
-        if (cap) state.industry_data.enrolment_scale = cap;
-    } else if (state.sector === 'logistics') {
-        if (custs.length > 0) state.industry_data.client_concentration = custs.join(', ');
-    }
+    if (docGrowthDrivers.length > 0)
+        state.industry_data = { ...state.industry_data, growth_drivers: docGrowthDrivers.slice(0, 4).join(', ') };
 
     // Infer ev_charging sub_sector for renewable companies
     if (state.sector === 'renewable' && !state.sub_sector) {
@@ -452,30 +411,15 @@ export function initializeStateFromDocument(structuredData: Record<string, unkno
         }
     }
 
-    // If document has extracted details, mark document intake mode active!
-    state.is_document_intake = true;
-
-    // Set m4_questions_asked=true if key fields are parsed from the document
-    const m4Keys = ['capacity', 'capacity_utilisation', 'client_concentration', 'certifications', 'regulatory_approvals', 'government_oem_exposure', 'accreditations', 'enrolment_scale'];
-    const hasM4Data = m4Keys.some(key => !!state.industry_data[key]);
-    state.m4_questions_asked = hasM4Data;
-
-    // Compute sufficiency
+    state.m4_questions_asked = false;
     const hasIndustrySignal = !!(state.sector || state.sub_sector);
-    const capacitySectors = ['renewable', 'realestate'];
-    const hasCapacitySignal = capacitySectors.includes(state.sector ?? '')
-        ? !!(state.deal_size || state.industry_data?.capacity || state.industry_data?.installed_capacity || state.sub_sector)
-        : !!(state.revenue || state.deal_size);
-
     const qualifyingFields = [
-        hasCapacitySignal,
+        !!(state.revenue || state.deal_size),
         !!(state.structure || state.intent),
         !!(state.geography),
     ].filter(Boolean).length;
-
     state.is_sufficient = hasIndustrySignal && qualifyingFields >= 2 && state.m4_questions_asked;
     state.phase = resolvePhase(state);
-
     return state;
 }
 
@@ -486,7 +430,9 @@ export function initializeStateFromDocument(structuredData: Record<string, unkno
 export function resolvePhase(state: RouterState): ConversationPhase {
     if (state.is_profile_search) return 'PROFILE_SEARCH';
 
-    // NM7: Awaiting intent confirmation
+    // NM8: Mandate verification in progress — hold phase until complete
+    if (state.quality_gate_passed && state.intent_validated === null && state.phase === 'MANDATE_VERIFICATION') return 'MANDATE_VERIFICATION';
+    // NM7: Legacy intent confirmation (backward compat for existing sessions)
     if (state.quality_gate_passed && state.intent_validated === null) return 'INTENT_VALIDATION';
     // NM7: User declined — soft close
     if (state.quality_gate_passed && state.intent_validated === false) return 'CLOSURE';

@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { X, Info, Building2, Lock, TrendingUp, BarChart3, Target } from 'lucide-react';
+import { X, Info, Building2, Lock, Target } from 'lucide-react';
 import { useUser } from './UserProvider';
 import type { Match } from './MatchWindow';
 
@@ -14,27 +14,12 @@ interface MatchDetailsModalProps {
   matchId?: string;
 }
 
-function ScoreBar({ label, value, color }: { label: string; value: number; color: string }) {
-  const pct = Math.min(100, Math.round(value * 100));
-  return (
-    <div className="flex items-center gap-3">
-      <span className="text-xs text-[#6B7280] font-medium w-20 shrink-0">{label}</span>
-      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs font-bold text-[#1F2937] w-10 text-right">{pct}%</span>
-    </div>
-  );
-}
-
 export default function MatchDetailsModal({ isOpen, onClose, match, matchName, matchDescription, matchId }: MatchDetailsModalProps) {
   const { isEOIApproved } = useUser();
   if (!isOpen) return null;
 
   // Support both new Match object and legacy props
   const finalScore = match?.finalScore ?? 0;
-  const confidenceScore = match?.confidenceScore ?? 0;
-  const scores = match?.scores;
   const reason = match?.matchReason || matchDescription || '';
   const sector = match?.counterparty?.sector || 'Undisclosed';
   const geography = match?.counterparty?.geography || 'India';
@@ -45,9 +30,6 @@ export default function MatchDetailsModal({ isOpen, onClose, match, matchName, m
   const matchIdNumeric = resolvedId ? parseInt(resolvedId.replace(/[^0-9]/g, '').slice(0, 4)) || 0 : 0;
   const approved = isEOIApproved(matchIdNumeric);
   const displayName = approved ? (matchName || `${sector} Counterparty`) : 'Strategic Partner';
-
-  const scoreColor = finalScore >= 80 ? 'text-emerald-700' : finalScore >= 60 ? 'text-amber-700' : 'text-gray-600';
-  const scoreLabel = finalScore >= 80 ? 'Strong Alignment' : finalScore >= 60 ? 'Good Compatibility' : 'Moderate Alignment';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-in fade-in duration-200">
@@ -70,10 +52,13 @@ export default function MatchDetailsModal({ isOpen, onClose, match, matchName, m
         <div className="p-6">
           {/* Identity section */}
           <div className="mb-5">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h4 className="text-xs font-bold text-[#F97316] uppercase tracking-widest">Qualified Match</h4>
+              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-700 font-bold">
+                <span>Alignment Score: {finalScore}</span>
+              </div>
               {!approved && (
-                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 rounded text-[10px] text-gray-500 font-bold">
+                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 rounded text-[10px] text-gray-500 font-bold border border-gray-200">
                   <Lock size={10} />
                   <span>Identity Protected</span>
                 </div>
@@ -82,46 +67,7 @@ export default function MatchDetailsModal({ isOpen, onClose, match, matchName, m
             <h2 className="text-xl font-extrabold text-[#1F2937] leading-tight">{displayName}</h2>
           </div>
 
-          {/* Score overview */}
-          <div className="grid grid-cols-2 gap-3 mb-5">
-            <div className="p-3 bg-gradient-to-br from-emerald-50 to-white rounded-xl border border-emerald-100">
-              <div className="flex items-center gap-1.5 text-emerald-700 font-bold text-xs uppercase mb-1">
-                <TrendingUp size={12} />
-                <span>Compatibility</span>
-              </div>
-              <div className={`text-2xl font-black ${scoreColor}`}>{finalScore.toFixed(0)}%</div>
-              <div className="text-[10px] text-gray-500 font-medium">{scoreLabel}</div>
-            </div>
-            <div className="p-3 bg-gradient-to-br from-blue-50 to-white rounded-xl border border-blue-100">
-              <div className="flex items-center gap-1.5 text-blue-700 font-bold text-xs uppercase mb-1">
-                <Target size={12} />
-                <span>Confidence</span>
-              </div>
-              <div className="text-2xl font-black text-blue-700">{confidenceScore.toFixed(0)}%</div>
-              <div className="text-[10px] text-gray-500 font-medium">
-                {confidenceScore >= 75 ? 'High' : confidenceScore >= 50 ? 'Medium' : 'Low'} Confidence
-              </div>
-            </div>
-          </div>
 
-          {/* Scoring breakdown */}
-          {scores && (
-            <div className="bg-[#F9FAFB] p-4 rounded-xl border border-[#E5E7EB] mb-5">
-              <div className="flex items-center gap-2 mb-3">
-                <BarChart3 size={14} className="text-[#6B7280]" />
-                <span className="text-sm font-bold text-[#1F2937]">Scoring Breakdown</span>
-              </div>
-              <div className="space-y-2.5">
-                <ScoreBar label="Intent" value={scores.intent} color="bg-[#F97316]" />
-                <ScoreBar label="Industry" value={scores.industry} color="bg-blue-500" />
-                <ScoreBar label="Financial" value={scores.financial} color="bg-emerald-500" />
-                <ScoreBar label="Niche" value={scores.niche} color="bg-purple-500" />
-                {scores.geography > 0 && (
-                  <ScoreBar label="Geography" value={scores.geography} color="bg-amber-500" />
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Counterparty details */}
           <div className="space-y-3">

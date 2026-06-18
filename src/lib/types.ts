@@ -46,7 +46,8 @@ export type ConversationPhase =
   | 'CLOSURE'
   | 'MATCHING'
   | 'PROFILE_SEARCH'
-  | 'INTENT_VALIDATION';  // NM7: awaiting genuine-mandate confirmation
+  | 'INTENT_VALIDATION'       // NM7: legacy binary confirmation (backward compat)
+  | 'MANDATE_VERIFICATION';   // NM8: multi-step mandate verification framework
 
 // ─────────────────────────────────────────────────────────────
 // CONVERSATION STATE (HARD TERMINAL FLOW STATE)
@@ -92,6 +93,14 @@ export interface RouterState {
   quality_gate_passed: boolean;
   quality_gate_attempted: boolean;
   intent_validated: boolean | null;         // null=not asked, true=yes, false=no
+
+  // Mandate Verification Framework (NM8)
+  verification_step: 'CONFIRMATION' | 'AUTHORITY' | 'READINESS' | 'MATERIALS' | 'COMPLETE' | null;
+  verification_authority: string | null;
+  verification_readiness: string | null;
+  verification_materials: string[] | null;
+  mandate_confidence_score: number | null;
+  mandate_confidence_tier: 'VERIFIED' | 'QUALIFIED' | 'EARLY_STAGE' | 'EXPLORATORY' | null;
 
   // M4 sector intelligence tracking
   m4_questions_asked: boolean;

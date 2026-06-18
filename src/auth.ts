@@ -25,6 +25,8 @@ const adapter = DrizzleAdapter(db, {
   verificationTokensTable: verificationTokens,
 });
 
+console.log("[AUTH] SESSION STRATEGY: jwt");
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter,
   secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
@@ -71,55 +73,50 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return null;
       },
     }),
+    Credentials({
+      id: "gmail-otp",
+      name: "Gmail OTP",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        code: { label: "Code", type: "text" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.code) return null;
+
+        const user = await db.query.users.findFirst({
+          where: eq(users.email, credentials.email as string),
+        });
+
+        if (!user || !user.otpCode || !user.otpExpires) return null;
+        if (new Date() > user.otpExpires) return null;
+        if (user.otpCode !== credentials.code) {
+          await db.update(users)
+            .set({ otpAttempts: (user.otpAttempts ?? 0) + 1 })
+            .where(eq(users.id, user.id));
+          return null;
+        }
+
+        // Clear OTP after successful verification
+        await db.update(users)
+          .set({ otpCode: null, otpExpires: null, otpAttempts: 0, emailVerified: new Date() })
+          .where(eq(users.id, user.id));
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          isPhoneVerified: user.isPhoneVerified,
+        };
+      },
+    }),
   ],
-  session: { strategy: "database" },
+  session: { strategy: "jwt" },
   callbacks: {
     // @ts-expect-error - callbacks might not be present in authConfig
     ...authConfig.callbacks,
     async signIn({ user }) {
-      console.log("SIGNIN FLOW:", { userId: user.id, userEmail: user.email });
-      if (!user.id) return true;
-
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      const whatsappPhone = cookieStore.get("whatsapp_phone")?.value;
-      console.log("SIGNIN WHATSAPP CHECK:", { whatsappPhone });
-
-      if (whatsappPhone) {
-        const existingUserWithPhone = await db.query.users.findFirst({
-          where: eq(users.phone, whatsappPhone),
-        });
-
-        // Case: User logs in with an EXISTING Google account, but we have a WhatsApp phone to link
-        if (existingUserWithPhone && existingUserWithPhone.id !== user.id) {
-          // If the conflict is with a placeholder, delete the placeholder and take the phone
-          if (existingUserWithPhone.email?.endsWith('@dealcollab.ai')) {
-            console.log("SIGNIN: Deleting placeholder user", existingUserWithPhone.id);
-            await db.delete(users).where(eq(users.id, existingUserWithPhone.id));
-          } else {
-            // Actual conflict with another real user
-            console.warn("SIGNIN CONFLICT: Phone already linked to another user", { 
-              whatsappPhone, 
-              existingUserId: existingUserWithPhone.id,
-              currentUserId: user.id
-            });
-            // DO NOT return a string here as it causes a redirect loop in App Router
-            return false; 
-          }
-        }
-
-        // Link the phone to this real Google user
-        console.log("SIGNIN: Linking phone to user", { userId: user.id, phone: whatsappPhone });
-        await db.update(users)
-          .set({
-            phone: whatsappPhone,
-            isPhoneVerified: true
-          })
-          .where(eq(users.id, user.id));
-
-        cookieStore.delete("whatsapp_phone");
-      }
-
+      console.log("[AUTH] signIn — userId:", user.id, "email:", user.email);
       return true;
     },
     async jwt({ token, user, trigger }) {

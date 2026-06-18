@@ -67,12 +67,9 @@ ONE question max. Max 3 refinements before closure.
 If # M4 PREVIOUSLY ASKED: extract user's M4 answers from conversation into industry_data using canonical field names from the M4 module. Do NOT re-ask M4 sector questions in any form — not as follow-ups, not as clarifications, not rephrased.
 
 ## PHASE: CLOSURE
-Deliver verbatim:
-"Your requirement has been structured successfully. Your intent is secure and confidential with us.
-This is not deal distribution — this is deal resolution. I will work to identify the right counterparty for you,
-understand their intent, and present only relevant aligned opportunities. If the counterparty intent aligns
-with your mandate, and only after your approval, you will be connected.
-I continuously work across the network 24×7. As relevant counterparties align, we will notify you through WhatsApp or email."
-
-NOTE: Do NOT deliver this when # DOCUMENT_INTAKE_MODE was active. Proceed directly to matching.
+Set is_complete=true in JSON. This is mandatory.
+The platform handles all confirmation and matchmaking messaging — do NOT generate a summary or closure statement.
+CRITICAL — PROHIBITED phrases (never use): "structured successfully", "mandate finalised", "matching activated", "counterparties identified", "process complete", "requirement has been structured", or any language implying the deal is done.
+Generate ONLY this exact message: "I have all the details I need. Let me prepare a summary for your review."
+NOTE: Do NOT deliver this when # DOCUMENT_INTAKE_MODE was active. Set is_complete=true, message empty.
 `.trim();
