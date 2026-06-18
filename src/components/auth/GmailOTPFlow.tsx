@@ -112,7 +112,7 @@ export default function GmailOTPFlow() {
         className="w-full bg-white text-[#1F2937] py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 border border-[#E5E7EB] hover:bg-gray-50 transition-all active:scale-[0.98] shadow-sm hover:shadow-md"
       >
         <Mail className="w-5 h-5 text-[#F97316]" />
-        <span className="font-semibold tracking-tight">Continue with Gmail</span>
+        <span className="font-semibold tracking-tight">Sign in with Email</span>
       </button>
     );
   }
@@ -130,7 +130,7 @@ export default function GmailOTPFlow() {
             >
               <ArrowLeft size={16} />
             </button>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gmail Login</span>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email Login</span>
           </div>
           <input
             type="email"
@@ -166,7 +166,7 @@ export default function GmailOTPFlow() {
             >
               <ArrowLeft size={16} />
             </button>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Check your Gmail</span>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Check your Email</span>
           </div>
           <p className="text-xs text-gray-500 font-medium pl-1">
             Code sent to <span className="text-[#1F2937] font-bold">{email}</span>

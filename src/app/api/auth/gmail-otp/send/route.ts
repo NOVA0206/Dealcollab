@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function generateOTP(): string {
@@ -11,6 +12,9 @@ function generateOTP(): string {
 
 export async function POST(req: Request) {
   console.log('[OTP SEND] ▶ Route handler entered');
+  console.log('BREVO_API_KEY exists:', !!process.env.BREVO_API_KEY);
+  console.log('BREVO_SENDER_EMAIL:', process.env.BREVO_SENDER_EMAIL ?? '(not set)');
+  console.log('BREVO_SENDER_NAME:', process.env.BREVO_SENDER_NAME ?? '(not set)');
 
   try {
     const { email } = await req.json();
@@ -51,9 +55,13 @@ export async function POST(req: Request) {
     const apiKey = process.env.BREVO_API_KEY;
     const senderEmail = process.env.BREVO_SENDER_EMAIL;
 
-    if (!apiKey || !senderEmail) {
-      console.error('[BREVO] Missing BREVO_API_KEY or BREVO_SENDER_EMAIL');
-      return NextResponse.json({ error: 'Email service not configured' }, { status: 500 });
+    if (!apiKey) {
+      console.error('[BREVO] BREVO_API_KEY is not set');
+      return NextResponse.json({ error: 'Email service not configured: missing API key' }, { status: 500 });
+    }
+    if (!senderEmail) {
+      console.error('[BREVO] BREVO_SENDER_EMAIL is not set');
+      return NextResponse.json({ error: 'Email service not configured: missing sender address' }, { status: 500 });
     }
 
     console.log('[BREVO] Sending OTP email via Brevo to:', normalizedEmail);
