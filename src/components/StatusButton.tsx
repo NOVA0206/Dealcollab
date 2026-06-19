@@ -108,11 +108,11 @@ export default function StatusButton({ status, isOpen, onClick }: StatusButtonPr
       </button>
       
       {status === 'Send EOI' && !canSendEOI && (
-        <a 
-          href="/profile/billing" 
+        <a
+          href="/profile/billing"
           className="text-[10px] font-bold text-primary-hover hover:underline"
         >
-          Buy Tokens →
+          Talk to Sales →
         </a>
       )}
     </div>

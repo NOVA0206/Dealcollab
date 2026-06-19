@@ -38,6 +38,50 @@ interface DBDeal {
   metadata?: { mandate_summary?: string; [key: string]: unknown };
 }
 
+const INTENT_PHRASE: Record<string, string> = {
+  BUY_SIDE: 'Seeking Acquisition Target',
+  SELL_SIDE: 'Available for Acquisition',
+  FUNDRAISING: 'Raising Growth Capital',
+  DEBT: 'Seeking Debt Financing',
+  STRATEGIC_PARTNERSHIP: 'Seeking Strategic Partner',
+};
+
+const SECTOR_LABEL: Record<string, string> = {
+  pharma: 'Pharma',
+  manufacturing: 'Manufacturing',
+  saas: 'SaaS',
+  finserv: 'Financial Services',
+  consumer: 'Consumer Goods',
+  realestate: 'Real Estate',
+  logistics: 'Logistics',
+  education: 'Education',
+  chemicals: 'Chemicals',
+  hospitality: 'Hospitality',
+  renewable: 'Renewable Energy',
+  defence: 'Defence',
+  oil_gas: 'Oil & Gas',
+  ngo: 'NGO / Non-Profit',
+  mixed: 'Diversified',
+};
+
+function generateDealTitle(dbDeal: DBDeal): string {
+  // Prefer AI-generated summary if it exists and is meaningful
+  const mandateSummary = dbDeal.metadata?.mandate_summary;
+  if (typeof mandateSummary === 'string' && mandateSummary.length > 20) {
+    return mandateSummary.slice(0, 120).trim();
+  }
+  if (dbDeal.summary_text && dbDeal.summary_text.length > 20) {
+    return dbDeal.summary_text.slice(0, 120).trim();
+  }
+
+  const sector = dbDeal.sectors?.[0] ?? '';
+  const sectorLabel = SECTOR_LABEL[sector] ?? (sector ? sector.charAt(0).toUpperCase() + sector.slice(1) : 'Business');
+  const intentLabel = dbDeal.intent ? (INTENT_PHRASE[dbDeal.intent] ?? dbDeal.intent) : 'Seeking Opportunity';
+  const geo = dbDeal.geographies?.[0] ? ` — ${dbDeal.geographies[0]}` : '';
+
+  return `${sectorLabel} ${intentLabel}${geo}`;
+}
+
 interface Deal {
   id: string | number;
   deal: string;
@@ -66,7 +110,7 @@ export default function DealLogPage() {
 
   const deals: Deal[] = (rawDeals || []).map((dbDeal: DBDeal) => ({
     id: dbDeal.id,
-    deal: `${dbDeal.intent || 'Deal'}: ${dbDeal.sectors?.[0] || 'Unknown Sector'}`,
+    deal: generateDealTitle(dbDeal),
     sector: dbDeal.sectors?.[0] || 'Unknown',
     region: dbDeal.geographies?.[0] || 'Global',
     summary: dbDeal.summary_text || dbDeal.raw_text || 'Deal summary unavailable',

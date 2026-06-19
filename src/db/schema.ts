@@ -133,6 +133,9 @@ export const eois = pgTable('eois', {
   senderId: uuid('sender_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   receiverId: uuid('receiver_id').references(() => users.id, { onDelete: 'cascade' }),
   status: eoiStatusEnum('status').default('sent').notNull(),
+  metadata: jsonb('metadata').default({}),
+  tokenDeducted: boolean('token_deducted').default(false),
+  tokenDeductedAt: timestamp('token_deducted_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

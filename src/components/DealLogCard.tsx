@@ -38,8 +38,11 @@ export default function DealLogCard({
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div className="flex flex-col gap-1.5 flex-1 pr-4">
             <div className="flex items-center gap-3">
-              <h3 className="text-lg font-bold text-foreground leading-none group-hover:text-primary-hover transition-colors">
-                {deal.deal}
+              <h3
+                title={deal.deal}
+                className="text-lg font-bold text-foreground leading-snug group-hover:text-primary-hover transition-colors line-clamp-2"
+              >
+                {deal.deal.length > 120 ? `${deal.deal.slice(0, 120)}…` : deal.deal}
               </h3>
               {deal.isNew && (
                 <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest bg-primary text-foreground animate-pulse">

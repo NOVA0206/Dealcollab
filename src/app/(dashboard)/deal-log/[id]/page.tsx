@@ -2,13 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  ArrowLeft, ShieldCheck, Globe, 
-  TrendingUp, Clock, Info, Coins, AlertCircle, 
+import {
+  ArrowLeft, ShieldCheck, Globe,
+  TrendingUp, Clock, Info, Coins, AlertCircle,
   Sparkles
 } from 'lucide-react';
 import { useUser } from '@/components/UserProvider';
 import { useNotifications } from '@/components/NotificationProvider';
+import SendEOIModal, { EOIFormData } from '@/components/SendEOIModal';
 
 
 import useSWR from 'swr';
@@ -40,12 +41,13 @@ const PREVIEW_TRUNCATE = 400;
 export default function MatchDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { tokens, refreshProfile } = useUser();
+  const { tokens } = useUser();
   const { addNotification } = useNotifications();
   const id = params.id as string;
 
   const { data, error, mutate } = useSWR(`/api/matches/detail/${id}`, fetcher);
   const [isSending, setIsSending] = useState(false);
+  const [isEOIModalOpen, setIsEOIModalOpen] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
 
   if (error) return (
@@ -74,19 +76,19 @@ export default function MatchDetailPage() {
   console.log('Match Explanation:', match?.matchReason);
   console.log('Preview Source:', counterparty?.previewSource ?? 'unknown');
 
-  const handleSendEOI = async () => {
+  const handleSendEOI = async (formData: EOIFormData) => {
     if ((tokens ?? 0) < 50) return;
-    
+
     setIsSending(true);
     try {
-      // 1. Create EOI record in database
       const resEoi = await fetch('/api/eois', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           dealId: match.proposalId,
           matchId: match.id,
-          receiverId: counterparty.userId
+          receiverId: counterparty.userId,
+          metadata: formData,
         })
       });
 
@@ -95,38 +97,20 @@ export default function MatchDetailPage() {
         throw new Error(err.error || 'Failed to send Expression of Interest');
       }
 
-      // 2. Debit tokens
-      const resTokens = await fetch('/api/profile/tokens', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'debit',
-          action: 'Connection with Deal',
-          amount: 50
-        })
-      });
-
-      if (!resTokens.ok) {
-        const err = await resTokens.json();
-        throw new Error(err.error || 'Failed to debit tokens');
-      }
-
-      // 3. Refresh user profile (so tokens in header update)
-      await refreshProfile();
-
+      setIsEOIModalOpen(false);
       addNotification({
         type: 'success',
-        message: 'Expression of Interest sent successfully.',
+        message: 'Expression of Interest sent. Tokens will be deducted upon approval.',
         time: 'Just now'
       });
-      
+
       mutate();
       router.push('/deal-dashboard');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       addNotification({
         type: 'error',
-        message: err.message || 'Something went wrong while sending EOI.',
+        message: err instanceof Error ? err.message : 'Something went wrong while sending EOI.',
         time: 'Just now'
       });
     } finally {
@@ -313,21 +297,11 @@ export default function MatchDetailPage() {
                        </button>
                     ) : hasTokens ? (
                        <button
-                         onClick={handleSendEOI}
-                         disabled={isSending}
-                         className="w-full sm:w-auto bg-[#F97316] text-white px-10 py-4 rounded-[20px] font-black text-xs uppercase tracking-widest shadow-xl shadow-orange-500/20 hover:bg-[#EA580C] hover:-translate-y-1 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:translate-y-0"
+                         onClick={() => setIsEOIModalOpen(true)}
+                         className="w-full sm:w-auto bg-[#F97316] text-white px-10 py-4 rounded-[20px] font-black text-xs uppercase tracking-widest shadow-xl shadow-orange-500/20 hover:bg-[#EA580C] hover:-translate-y-1 transition-all flex items-center justify-center gap-3"
                        >
-                          {isSending ? (
-                             <>
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Sending...
-                             </>
-                          ) : (
-                             <>
-                                Send EOI — 50 tokens
-                                <Sparkles size={16} />
-                             </>
-                          )}
+                         Send EOI
+                         <Sparkles size={16} />
                        </button>
                     ) : (
                        <div className="flex flex-col items-center gap-4 w-full">
@@ -338,11 +312,11 @@ export default function MatchDetailPage() {
                              Insufficient Tokens
                              <AlertCircle size={16} />
                           </button>
-                          <Link 
+                          <Link
                             href="/profile/billing"
                             className="text-xs font-black text-[#F97316] uppercase tracking-widest hover:underline"
                           >
-                             Buy Tokens to Connect →
+                            Talk to Sales to Get Tokens →
                           </Link>
                        </div>
                     )}
@@ -363,6 +337,14 @@ export default function MatchDetailPage() {
         </div>
 
       </div>
+
+      <SendEOIModal
+        isOpen={isEOIModalOpen}
+        onClose={() => setIsEOIModalOpen(false)}
+        dealName={counterparty?.teaser ? counterparty.teaser.slice(0, 60) : 'Confidential Mandate'}
+        isSubmitting={isSending}
+        onSubmit={handleSendEOI}
+      />
     </div>
   );
 }

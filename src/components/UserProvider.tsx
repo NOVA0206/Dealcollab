@@ -241,51 +241,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const isEOIApproved = useCallback((dealId: number) => approvedDeals.includes(dealId), [approvedDeals]);
 
-  const approveEOI = useCallback(async (dealId: number) => {
+  const approveEOI = useCallback((dealId: number) => {
+    // Token deduction now happens server-side in PATCH /api/eois on approval.
+    // This client-side helper only tracks local approval state for UI purposes.
     if (approvedDeals.includes(dealId)) return;
-    if ((tokens ?? 0) < 50) {
-      addNotification({
-        type: 'error',
-        message: 'Insufficient tokens to connect with this deal.',
-        time: 'Just now'
-      });
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/profile/tokens', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'debit',
-          action: 'Connection with Deal',
-          amount: 50
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setTokens(data.balance);
-        setApprovedDeals(d => [...d, dealId]);
-        addNotification({
-          type: 'success',
-          message: 'Connection approved! 50 tokens debited.',
-          time: 'Just now'
-        });
-      } else {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to approve connection');
-      }
-    } catch (error: unknown) {
-      console.error("FULL ERROR:", error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      addNotification({
-        type: 'error',
-        message: errorMessage || 'Something went wrong.',
-        time: 'Just now'
-      });
-    }
-  }, [approvedDeals, tokens, addNotification]);
+    setApprovedDeals(d => [...d, dealId]);
+  }, [approvedDeals]);
 
   const addTokens = useCallback((amount: number) => {
     // Note: Tokens are actually added via the Profile API now for rewards

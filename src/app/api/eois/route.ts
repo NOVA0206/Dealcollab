@@ -134,7 +134,18 @@ export async function POST(req: NextRequest) {
     if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const { dealId, matchId, receiverId } = body;
+    const { dealId, matchId, receiverId, metadata } = body;
+
+    if (!dealId) return NextResponse.json({ error: 'dealId is required' }, { status: 400 });
+
+    // Server-side validation of required EOI fields
+    if (metadata) {
+      const required = ['fullName', 'companyName', 'designation', 'email', 'phone', 'investmentInterest'];
+      const missing = required.filter(f => !metadata[f]?.trim?.());
+      if (missing.length > 0) {
+        return NextResponse.json({ error: `Missing required fields: ${missing.join(', ')}` }, { status: 400 });
+      }
+    }
 
     const supabase = createServerSupabaseClient();
     if (!supabase) throw new Error("Supabase client failed to initialize");
@@ -149,7 +160,8 @@ export async function POST(req: NextRequest) {
         match_id: matchId,
         sender_id: dbUser.id,
         receiver_id: receiverId,
-        status: 'sent'
+        status: 'sent',
+        metadata: metadata || {},
       }])
       .select()
       .single();
@@ -174,6 +186,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
+const TOKEN_COST = 50;
+
 export async function PATCH(req: NextRequest) {
   try {
     const session = await auth();
@@ -188,10 +202,10 @@ export async function PATCH(req: NextRequest) {
     const { data: dbUser } = await supabase.from('users').select('id').eq('email', session.user.email).single();
     if (!dbUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    // Ensure user is the receiver
+    // Ensure user is the receiver and fetch token_deducted flag
     const { data: existingEoi, error: fetchErr } = await supabase
       .from('eois')
-      .select('receiver_id, sender_id')
+      .select('receiver_id, sender_id, token_deducted')
       .eq('id', id)
       .single();
 
@@ -209,7 +223,60 @@ export async function PATCH(req: NextRequest) {
 
     if (eoiErr) throw eoiErr;
 
-    // Notify Sender
+    // Token deduction — only when approving and not already deducted
+    if (status === 'approved' && !existingEoi.token_deducted) {
+      try {
+        // Atomic lock: update token_deducted only if still false (race condition guard)
+        const { data: lockResult } = await supabase
+          .from('eois')
+          .update({ token_deducted: true, token_deducted_at: new Date().toISOString() })
+          .eq('id', id)
+          .eq('token_deducted', false)
+          .select('id')
+          .single();
+
+        if (lockResult) {
+          // We hold the lock — proceed with deduction from sender's balance
+          const { data: senderUser } = await supabase
+            .from('users')
+            .select('id, tokens')
+            .eq('id', existingEoi.sender_id)
+            .single();
+
+          if (senderUser && (senderUser.tokens ?? 0) >= TOKEN_COST) {
+            const newBalance = (senderUser.tokens ?? 0) - TOKEN_COST;
+            await supabase
+              .from('users')
+              .update({ tokens: newBalance })
+              .eq('id', senderUser.id);
+
+            await supabase.from('token_transactions').insert([{
+              user_id: senderUser.id,
+              type: 'debit',
+              action: 'EOI Approved — Connection with Deal',
+              amount: -TOKEN_COST,
+              balance_after: newBalance,
+            }]);
+
+            // Notify sender of deduction
+            await supabase.from('notifications').insert([{
+              user_id: existingEoi.sender_id,
+              type: 'TOKENS_DEDUCTED',
+              message: `Your EOI was approved. ${TOKEN_COST} tokens have been deducted from your account.`,
+              is_read: 'false'
+            }]);
+          } else {
+            // Insufficient tokens — still approved but log
+            console.warn(`[EOI APPROVE] Sender ${existingEoi.sender_id} has insufficient tokens for deduction.`);
+          }
+        }
+      } catch (tokenErr) {
+        // Token deduction failure must not block the approval response
+        console.error("🔥 Token deduction on EOI approval failed:", tokenErr);
+      }
+    }
+
+    // Notify Sender of approval/decline
     await supabase.from('notifications').insert([{
       user_id: existingEoi.sender_id,
       type: `EOI_${status.toUpperCase()}`,

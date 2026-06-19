@@ -5,7 +5,7 @@ import useSWR from 'swr';
 import DashboardRow, { DashboardDeal } from '@/components/DashboardRow';
 import { DashboardStatus } from '@/components/StatusButton';
 import { DashboardSkeleton, EmptyState, ErrorState } from '@/components/Skeleton';
-import SendEOIModal from '@/components/SendEOIModal';
+import SendEOIModal, { EOIFormData } from '@/components/SendEOIModal';
 import { LayoutGrid, PlusCircle } from 'lucide-react';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
@@ -110,7 +110,8 @@ export default function DealDashboardPage() {
     setEoiModal({ isOpen: true, deal: item });
   };
 
-  const handleEOISuccess = () => {
+  const handleEOISubmit = async (_data: EOIFormData) => {
+    setEoiModal({ isOpen: false, deal: null });
     mutateOutbound();
     mutateInbound();
   };
@@ -215,11 +216,11 @@ export default function DealDashboardPage() {
         )}
       </div>
 
-      <SendEOIModal 
+      <SendEOIModal
         isOpen={eoiModal.isOpen}
         onClose={() => setEoiModal({ isOpen: false, deal: null })}
         dealName={eoiModal.deal?.deal || ''}
-        onSuccess={handleEOISuccess}
+        onSubmit={handleEOISubmit}
       />
     </div>
     </div>

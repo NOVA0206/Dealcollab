@@ -69,7 +69,7 @@ export default function TokenUsagePage() {
             className="flex items-center gap-3 bg-[#1F2937] text-white px-8 py-4 rounded-[20px] font-black uppercase text-xs tracking-[0.2em] shadow-xl hover:bg-[#F97316] transition-all"
           >
             <CreditCard size={18} />
-            Buy Tokens
+            Talk to Sales
             <ArrowUpRight size={18} />
           </Link>
         </div>

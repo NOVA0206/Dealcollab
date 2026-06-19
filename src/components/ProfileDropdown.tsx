@@ -84,7 +84,7 @@ export default function ProfileDropdown() {
               <div className="w-8 h-8 rounded-lg bg-primary-soft/50 flex items-center justify-center group-hover:bg-white group-hover:shadow-sm transition-all">
                 <CreditCard size={16} className="group-hover:text-primary-hover transition-colors" />
               </div>
-              <span className="font-bold">Billing</span>
+              <span className="font-bold">Contact Sales</span>
             </Link>
             <a 
               href="mailto:support@dealcollab.in"
