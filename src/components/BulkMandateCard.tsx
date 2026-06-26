@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DealLogCard from './DealLogCard';
 import { Match } from './MatchWindow';
+import { DealStatus } from './StatusBadge';
 import { Search, Loader2 } from 'lucide-react';
 
 const INTENT_PHRASE: Record<string, string> = {
