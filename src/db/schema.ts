@@ -192,6 +192,7 @@ export const mandates = pgTable('mandates', {
 export const proposals = pgTable('proposals', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  mandateId: uuid('mandate_id').references(() => mandates.id, { onDelete: 'set null' }),
   rawText: text('raw_text'),
   normalisedText: text('normalised_text').notNull(),
   intent: text('intent').notNull(),
@@ -204,7 +205,7 @@ export const proposals = pgTable('proposals', {
   revenueMaxCr: numeric('revenue_max_cr'),
   specialConditions: text('special_conditions').array(),
   qualityScore: numeric('quality_score'),
-  qualityTier: text('quality_tier'),
+  qualityTier: numeric('quality_tier'),
   status: text('status').default('ACTIVE').notNull(),
   fraudFlags: text('fraud_flags').array(),
   advisorName: text('advisor_name'),

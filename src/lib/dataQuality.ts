@@ -122,7 +122,7 @@ export function normalizeSize(text: string): NormalizedSize | null {
         // Detect the explicit unit on each side; a side with no unit inherits the
         // other side's unit (so "50-100 Cr" still treats both as Cr). Then sort, so
         // min_cr ≤ max_cr no matter how the units shake out.
-        const sides = clean.split(/\s*(?:to|–|-)\s*/);
+        const sides = clean.split(/\s*(?:\bto\b|–|-)\s*/);  // \bto\b prevents "total"/"stock" splits
         const loOwn = explicitUnitOf(sides[0] ?? '');
         const hiOwn = explicitUnitOf(sides[sides.length - 1] ?? '');
         const loUnit = loOwn ?? hiOwn ?? unit;
@@ -152,13 +152,15 @@ function detectUnit(text: string): SizeUnit | null {
     // Exclude non-financial size units
     if (/\bmw\b|\bmwp\b|\bmwdc\b|\bacres?\b|\bsq\.?\s?ft\b|\bhectare/.test(text)) return null;
 
-    // Order matters — check most specific first
-    if (/\bbillion\b/.test(text)) return 'billion_inr';
-    if (/(usd|us\$|\$|dollar)/.test(text) && /m(illion)?/.test(text)) return 'million_usd';
-    if (/inr/.test(text) && /m(illion)?/.test(text)) return 'million_inr';
-    if (/cr(ore)?s?/.test(text)) return 'cr';
-    if (/l(akh)?s?/.test(text)) return 'lakh';
-    if (/m(illion)?/.test(text)) return 'million_inr'; // bare "million" = INR million in India context
+    // Order matters — check most specific first.
+    // All patterns use word boundaries so substrings like "sell" (has 'l'),
+    // "increase" (has 'cr'), "company" (has 'm') don't trigger false unit detection.
+    if (/\bbillion\b/i.test(text)) return 'billion_inr';
+    if (/(usd|us\$|\$|dollar)/i.test(text) && /\bmillion\b|\bmn\b/i.test(text)) return 'million_usd';
+    if (/\binr\b/i.test(text) && /\bmillion\b|\bmn\b/i.test(text)) return 'million_inr';
+    if (/\bcr(?:ore)?s?\b/i.test(text)) return 'cr';
+    if (/\blakhs?\b|\blacs?\b/i.test(text)) return 'lakh';  // requires whole-word match — "sell" no longer triggers this
+    if (/\bmillion\b|\bmn\b/i.test(text)) return 'million_inr';
 
     // Default: assume Crore (most common unit in Indian M&A deal sizes)
     return 'cr';

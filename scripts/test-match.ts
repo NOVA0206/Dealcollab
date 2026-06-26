@@ -76,7 +76,8 @@ async function main() {
     const t0 = Date.now();
 
     const result = await executeMatchmaking({
-        mandateId: p.id,
+        id: p.id,
+        mandateId: p.mandate_id,
         userId: p.user_id,
         intent: p.intent || '',
         raw_text: p.raw_text || '',

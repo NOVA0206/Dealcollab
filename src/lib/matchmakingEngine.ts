@@ -246,25 +246,11 @@ function applyHardRejections(
     }
   }
 
-  // 5. Geography Filter
-  if (source.geography && candidate.geographies && candidate.geographies.length > 0) {
-    const srcGeo = source.geography.toLowerCase().trim();
-    if (srcGeo !== 'flexible' && srcGeo !== 'india' && srcGeo !== 'pan india') {
-      const cndGeos = candidate.geographies.map(g => g.toLowerCase().trim());
-      const geoMatched = cndGeos.some(g =>
-        g === srcGeo ||
-        g.includes(srcGeo) ||
-        srcGeo.includes(g) ||
-        sameState(srcGeo, g) ||
-        g === 'flexible' ||
-        g === 'india' ||
-        g === 'pan india'
-      );
-      if (!geoMatched) {
-        return { rejected: true, reason: `Geography mismatch: candidate in [${candidate.geographies.join(', ')}] not aligned with ${source.geography}` };
-      }
-    }
-  }
+  // 5. Geography — soft penalty only; NOT a hard rejection.
+  // With a sparse database (2856+ proposals), hard geo rejection eliminates too many
+  // legitimate counterparties. The V2 geo proximity scorer in calculateV2Score already
+  // reduces the final score for geo mismatches — that's sufficient.
+  // Hard rejection re-enabled only for city-locked mandates with explicit "local-only" flag.
 
   // HR-7: Shell company filtering (NM5)
   if (!source.is_shell_query && candidate.is_shell === true) {
@@ -299,7 +285,6 @@ function buildMatchReason(
   candidate: Candidate,
   breakdown: Record<string, number>,
   comp: { level: string; reason: string },
-  archetype: string,
 ): string {
   const srcNorm = normalizeSector(source.sector ?? '');
   const cndNorm = normalizeSector(candidate.sectors?.[0] ?? '');
@@ -310,38 +295,79 @@ function buildMatchReason(
   const sizeLabel = formatSizeRange(cMin, cMax);
   const { semanticScore, industryScore, financialScore, geoScore } = breakdown;
 
-  // Bullet-point explanation (Phase 6)
-  const bullets: string[] = [];
+  // ── WHY MATCHED ─────────────────────────────────────────────
+  const whyBullets: string[] = [];
   if (srcNorm && srcNorm === cndNorm) {
-    bullets.push(`Exact sector match — same ${sectorLabel} sector`);
+    whyBullets.push(`Exact sector match — both mandates are in the ${sectorLabel} sector`);
   } else if (industryScore >= 0.45) {
-    bullets.push(`Compatible sector: ${sectorLabel} — ${archetype.toLowerCase()}`);
+    whyBullets.push(`Compatible adjacent sector: ${sectorLabel} — ${comp.reason.split('.')[0].toLowerCase()}`);
+  } else {
+    whyBullets.push(`Cross-sector opportunity in ${sectorLabel}`);
   }
   if (geoScore >= 0.9) {
-    bullets.push(`Exact geography: ${geoLabel}`);
+    whyBullets.push(`Exact geographic match — both in ${geoLabel}`);
   } else if (geoScore >= 0.75) {
-    bullets.push(`Same region: ${geoLabel}`);
+    whyBullets.push(`Same market: ${geoLabel}`);
   } else if (geoScore >= 0.45) {
-    bullets.push(`Same state: ${geoLabel}`);
+    whyBullets.push(`Same state cluster: ${geoLabel}`);
   } else if (geoScore >= 0.2) {
-    bullets.push(`Same zone: ${geoLabel}`);
+    whyBullets.push(`Same broad zone: ${geoLabel}`);
+  } else {
+    whyBullets.push(`Geographic reach beyond primary market`);
   }
   if (financialScore >= 0.7) {
-    bullets.push(`Strong financial alignment${sizeLabel ? ': ' + sizeLabel : ''}`);
+    whyBullets.push(`Strong deal size alignment${sizeLabel ? ': ' + sizeLabel : ''}`);
+  } else if (financialScore >= 0.4 && sizeLabel) {
+    whyBullets.push(`Deal size within acceptable range: ${sizeLabel}`);
   } else if (sizeLabel) {
-    bullets.push(`Deal size: ${sizeLabel}`);
+    whyBullets.push(`Reference deal size: ${sizeLabel}`);
   }
   if (semanticScore >= 0.7) {
-    bullets.push('Strong mandate-to-opportunity semantic alignment');
+    whyBullets.push('Strong mandate-level semantic alignment — business profiles are closely matched');
   } else if (semanticScore >= 0.5) {
-    bullets.push('Moderate mandate alignment detected');
+    whyBullets.push('Moderate business profile alignment — overlapping strategic priorities detected');
   }
-  if (bullets.length === 0) {
-    bullets.push(`${sectorLabel} opportunity in ${geoLabel}${sizeLabel ? ' · ' + sizeLabel : ''}`);
+  if (source.intent_focus) {
+    whyBullets.push(`Strategic objective alignment: ${source.intent_focus}`);
   }
-  const reason = bullets.map(b => `• ${b}`).join('\n');
 
-  // Fit field texts for MatchPanel detail view (Phase 5)
+  // ── DEAL STRUCTURE COMPATIBILITY ────────────────────────────
+  const structBullets: string[] = [];
+  const srcStruct = (source.structure ?? '').toLowerCase();
+  const cndStruct = (candidate.deal_structure ?? '').toLowerCase();
+  if (srcStruct && cndStruct) {
+    const fullBuyer = srcStruct.includes('100%') || srcStruct.includes('full');
+    const fullSeller = cndStruct.includes('100%') || cndStruct.includes('full sale');
+    const minBuyer = srcStruct.includes('minority');
+    const majBuyer = srcStruct.includes('majority');
+    if (fullBuyer && fullSeller) structBullets.push('Full acquisition — structure aligned');
+    else if (majBuyer && (cndStruct.includes('majority') || cndStruct.includes('control'))) {
+      structBullets.push('Majority stake — structure aligned');
+    } else if (minBuyer && (cndStruct.includes('minority') || cndStruct.includes('growth'))) {
+      structBullets.push('Minority / growth stake — structure aligned');
+    } else if (srcStruct && cndStruct) {
+      structBullets.push(`Source: ${source.structure} — Counterparty: ${candidate.deal_structure}`);
+    }
+  } else if (srcStruct) {
+    structBullets.push(`Mandate structure: ${source.structure}`);
+  }
+
+  // ── POTENTIAL CONCERNS ────────────────────────────────────────
+  const concerns: string[] = [];
+  if (geoScore < 0.2 && geoLabel) {
+    concerns.push(`Geography gap — counterparty located in ${geoLabel}; requires cross-region engagement`);
+  }
+  if (financialScore < 0.3 && sizeLabel) {
+    concerns.push(`Deal size divergence — verify ticket size compatibility before proceeding`);
+  }
+  if (srcNorm !== cndNorm && industryScore < 0.45) {
+    concerns.push(`Cross-sector match — operational overlap requires validation during diligence`);
+  }
+
+  // Compose final reason object
+  const whyReason = whyBullets.map(b => `• ${b}`).join('\n');
+
+  // Fit field texts for MatchPanel detail view
   const sectorFit = srcNorm === cndNorm
     ? `Exact match — ${sectorLabel}`
     : industryScore >= 0.45
@@ -364,14 +390,14 @@ function buildMatchReason(
       : `Within range: ${sizeLabel}`
     : null;
 
-  const strategicFit = source.intent_focus ?? null;
-
   return JSON.stringify({
-    reason,
+    reason: whyReason,
     sectorFit,
     geographyFit,
     ...(revenueFit ? { revenueFit } : {}),
-    ...(strategicFit ? { strategicFit } : {}),
+    ...(source.intent_focus ? { strategicFit: source.intent_focus } : {}),
+    ...(structBullets.length ? { structureFit: structBullets[0] } : {}),
+    ...(concerns.length ? { concerns: concerns.join(' · ') } : {}),
   });
 }
 
@@ -436,8 +462,12 @@ function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreRes
     freshnessScore * W.FRESHNESS * 100;
 
   // ADJUSTMENTS
-  if (!isSameSector) finalScore -= 15; // Cross-sector penalty to guarantee same-sector preference
-  if (comp.level === 'NARROW') finalScore -= 10;
+  // Cross-sector penalty reduced to -8 (was -15): compatible adjacent sectors
+  // (e.g. pharma↔chemicals, saas↔finserv) were scoring below the 40-point threshold
+  // and getting discarded entirely. The industry score already rewards exact matches;
+  // this penalty only differentiates them from adjacent-sector matches.
+  if (!isSameSector) finalScore -= 8;
+  if (comp.level === 'NARROW') finalScore -= 5; // was -10
   // Phase 4: tiered geo bonus (5 proximity levels)
   if (geoScore >= 0.9) finalScore += 10;       // exact city
   else if (geoScore >= 0.75) finalScore += 7;   // city-in-region
@@ -462,7 +492,7 @@ function calculateV2Score(source: ProposalInput, candidate: Candidate): ScoreRes
 
   // MATCH REASON — structured JSON (Phases 5 & 6): bullet-point reason + sectorFit / geographyFit / revenueFit
   const breakdown = { semanticScore, industryScore, financialScore, geoScore, freshnessScore };
-  const matchReason = buildMatchReason(source, candidate, breakdown, comp, archetype);
+  const matchReason = buildMatchReason(source, candidate, breakdown, comp);
 
   return {
     finalScore,
@@ -739,6 +769,20 @@ export async function executeMatchmaking(
     return null;
   }
 
+  // Application-level validation for mandateId existence before executing matching / OpenAI embedding calls
+  if (input.mandateId) {
+    const { data: mandate, error: checkErr } = await supabase
+      .from('mandates')
+      .select('id')
+      .eq('id', input.mandateId)
+      .maybeSingle();
+
+    if (checkErr || !mandate) {
+      console.error(`[M5] Validation failed: mandateId ${input.mandateId} does not exist in mandates table.`, checkErr);
+      throw new Error(`Invalid mandate_id: ${input.mandateId} does not exist in the mandates table.`);
+    }
+  }
+
   try {
     // ── Phase 1: Build canonical texts ───────────────────────
     const storageText = buildCanonicalText(input);
@@ -769,7 +813,7 @@ export async function executeMatchmaking(
 
     const { data: proposal, error: propErr } = await supabase
       .from('proposals')
-      .insert([{
+      .upsert([{
         id: input.id || undefined,
         user_id: input.userId,
         mandate_id: input.mandateId,
@@ -879,6 +923,7 @@ export async function executeMatchmaking(
     let geographyMatchCount = 0;
     let sizeMatchCount = 0;
     let eligibleMatchCount = 0;
+    const rejectionReasons: Record<string, number> = {};
 
     for (const cand of candidates) {
       const { rejected, reason } = applyHardRejections(input, cand);
@@ -897,7 +942,11 @@ export async function executeMatchmaking(
       const sizeMatched = !(sMax > 0 && cMax > 0 && (Math.max(sMax, cMax) / Math.max(Math.min(sMax, cMax), 0.01)) > 10);
       if (sizeMatched) sizeMatchCount++;
 
-      if (rejected) { console.log(`[M5] REJECT ${cand.id}: ${reason}`); continue; }
+      if (rejected) {
+        const ruleKey = (reason ?? 'UNKNOWN').split(':')[0].trim();
+        rejectionReasons[ruleKey] = (rejectionReasons[ruleKey] ?? 0) + 1;
+        continue;
+      }
 
       // HR-6: Advisor flood cap
       if (cand.contact_phone) {
@@ -929,6 +978,14 @@ export async function executeMatchmaking(
       }
     }
 
+    console.log(`[M5] ── Pipeline telemetry ──────────────────────────────`);
+    console.log(`[M5] pgvector candidates:  ${candidates.length}`);
+    console.log(`[M5] sector compatible:    ${sectorMatchCount}`);
+    console.log(`[M5] geo aligned:          ${geographyMatchCount}`);
+    console.log(`[M5] size aligned:         ${sizeMatchCount}`);
+    console.log(`[M5] passed hard rules:    ${eligibleMatchCount}`);
+    console.log(`[M5] scored ≥40:           ${scoredRows.length}`);
+    console.log(`[M5] HR rejections:        ${JSON.stringify(rejectionReasons)}`);
     console.log(`[SECTOR_MATCHES] Sector matches count: ${sectorMatchCount}`);
     console.log(`[GEOGRAPHY_MATCHES] Geography matches count: ${geographyMatchCount}`);
     console.log(`[SIZE_MATCHES] Size matches count: ${sizeMatchCount}`);

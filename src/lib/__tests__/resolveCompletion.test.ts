@@ -18,11 +18,9 @@ describe('resolveCompletion — quality gate funnel (correct behavior)', () => {
     expect(r.shouldInsert).toBe(false);
     expect(r.state.quality_gate_passed).toBe(true);
     expect(r.state.is_complete).toBe(false);
-    expect(r.extraction.is_complete).toBe(false);
     expect(r.state.phase).toBe('INTENT_VALIDATION');
     expect(r.state.intent_validated).toBeNull();
     expect(r.reason).toBe('quality-gate-pass-await-validation');
-    expect(r.extraction.message).toContain("Is this a genuine mandate?");
   });
 
   it('B. SELL_SIDE missing geography → quality FAIL (first) → extend, no insert', () => {
@@ -46,10 +44,7 @@ describe('resolveCompletion — quality gate funnel (correct behavior)', () => {
     const r = run({ storedState: stored, candidateState: stored, message: 'ready', extraction: ext({ is_complete: true }) });
     expect(r.state.quality_gate_passed).toBe(true);
     expect(r.state.phase).toBe('INTENT_VALIDATION');
-    expect(r.state.is_complete).toBe(false);
-    expect(r.extraction.is_complete).toBe(false);
     expect(r.reason).toBe('quality-gate-pass-await-validation');
-    expect(r.extraction.message).toContain("Is this a genuine mandate?");
   });
 });
 
@@ -209,20 +204,135 @@ describe('resolveCompletion — in-progress turn', () => {
   });
 });
 
-describe('resolveCompletion — pre-detection persistence', () => {
-  it('should persist intent_focus from candidateState when not present in extraction', () => {
+// ─────────────────────────────────────────────────────────────
+// Step 1 — terminal lock + genuine-mandate gate can't get stuck
+// ─────────────────────────────────────────────────────────────
+
+import { TERMINAL_STATUS_LINE } from '../resolveCompletion';
+
+describe('resolveCompletion — terminal lock (Step 1 ✓)', () => {
+  const captured = () => baseState({
+    intent: 'SELL_SIDE', sector: 'pharma', geography: 'Mumbai', revenue: '₹50 Cr',
+    m4_questions_asked: true, quality_gate_passed: true, intent_validated: true,
+    is_complete: true, is_captured: true, phase: 'CLOSURE', turn_count: 6,
+  });
+
+  it('S1. after capture, ANY further message returns the SAME fixed status line, no insert', () => {
+    for (const msg of ['ok', 'thanks', 'any update?', 'go ahead', 'find matches now']) {
+      const stored = captured();
+      const r = run({ storedState: stored, candidateState: stored, message: msg, extraction: ext({ message: 'something the AI made up' }) });
+      expect(r.shouldInsert).toBe(false);                 // never re-insert
+      expect(r.reason).toBe('already-captured');
+      expect(r.extraction.message).toBe(TERMINAL_STATUS_LINE); // one fixed line, every time
+      expect(r.state.is_complete).toBe(true);
+      expect(r.state.phase).toBe('CLOSURE');
+    }
+  });
+
+  it('S2. the capture turn itself inserts ONCE and stamps is_captured for next turn', () => {
+    // quality already passed + user confirms genuine mandate ("yes") → completes now.
     const stored = baseState({
-      intent: 'BUY_SIDE', sector: 'saas', geography: 'Pune', deal_size: '50 Cr', structure: 'Full Buyout',
+      intent: 'SELL_SIDE', sector: 'pharma', geography: 'Mumbai', revenue: '₹50 Cr',
+      m4_questions_asked: true, quality_gate_passed: true, intent_validated: null,
+      phase: 'INTENT_VALIDATION', turn_count: 4, is_captured: false,
     });
-    const candidate = { ...stored, intent_focus: 'Geographical expansion' };
-    const r = run({
-      storedState: stored,
-      candidateState: candidate,
-      message: 'Geographical Expansion',
-      extraction: ext({ is_complete: false, state: { intent_focus: null } }),
-    });
-    expect(r.state.intent_focus).toBe('Geographical expansion');
-    expect(r.state.strategic_intent).toBe('Geographical expansion');
+    const r = run({ storedState: stored, candidateState: stored, message: 'yes', extraction: ext({ is_complete: false, intent_validation: 'yes' }) });
+    expect(r.state.intent_validated).toBe(true);
+    expect(r.shouldInsert).toBe(true);          // inserts on THIS turn
+    expect(r.state.is_captured).toBe(true);      // stamped → next turn is terminal
+    expect(r.reason).toBe('intent-validated-yes');
   });
 });
 
+describe('resolveCompletion — genuine-mandate gate cannot be skipped or stuck (Step 1 ✓)', () => {
+  it('S3. quality passed but phase wrongly stuck at CLOSURE with no Yes/No yet → un-sticks to INTENT_VALIDATION, no insert', () => {
+    // Reproduces "Phase regression blocked: CLOSURE → INTENT_VALIDATION": a prior turn left
+    // phase=CLOSURE while the genuine-mandate answer was still pending. A neutral message must
+    // re-present the gate, not silently stay closed and skip confirmation.
+    const stored = baseState({
+      intent: 'SELL_SIDE', sector: 'pharma', geography: 'Mumbai', revenue: '₹50 Cr',
+      m4_questions_asked: true, quality_gate_passed: true, intent_validated: null,
+      phase: 'CLOSURE', turn_count: 4,
+    });
+    const r = run({ storedState: stored, candidateState: stored, message: 'what does that mean?', extraction: ext({ is_complete: false }) });
+    expect(r.state.intent_validated).toBeNull();    // not answered yet
+    expect(r.state.is_complete).toBe(false);         // cannot complete without a real yes
+    expect(r.state.phase).toBe('INTENT_VALIDATION');  // un-stuck from CLOSURE
+    expect(r.shouldInsert).toBe(false);
+  });
+
+  it('S4. quality passed + explicit "no" → declines, no insert, not captured', () => {
+    const stored = baseState({
+      intent: 'SELL_SIDE', sector: 'pharma', geography: 'Mumbai', revenue: '₹50 Cr',
+      m4_questions_asked: true, quality_gate_passed: true, intent_validated: null,
+      phase: 'INTENT_VALIDATION', turn_count: 4,
+    });
+    const r = run({ storedState: stored, candidateState: stored, message: 'no, just exploring', extraction: ext({ intent_validation: 'no' }) });
+    expect(r.state.intent_validated).toBe(false);
+    expect(r.shouldInsert).toBe(false);
+    expect(r.state.is_captured).toBeFalsy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// A1 — engine owns the message for every decided stage
+// ─────────────────────────────────────────────────────────────
+
+import {
+  GENUINE_MANDATE_QUESTION,
+  INTENT_DECLINED_MESSAGE,
+  CAPTURE_CONFIRMATION,
+} from '../resolveCompletion';
+
+describe('resolveCompletion — one voice: correct message per stage (A1 ✓)', () => {
+  const full = (over = {}) => baseState({
+    intent: 'SELL_SIDE', sector: 'pharma', geography: 'Mumbai', revenue: '₹50 Cr',
+    m4_questions_asked: true, ...over,
+  });
+
+  it('A1a. plain qualification turn (asking questions) → NO override, AI message is kept', () => {
+    const stored = baseState({ intent: 'SELL_SIDE', sector: 'pharma', phase: 'QUALIFICATION' });
+    const r = run({ storedState: stored, candidateState: stored, message: 'it is a formulations business', extraction: ext({ is_complete: false, message: 'And what is the approximate annual revenue and transaction structure?' }) });
+    expect(r.messageOverride).toBeNull();
+    expect(r.extraction.message).toContain('revenue'); // AI question preserved
+  });
+
+  it('A1b. quality gate fails (no geography) → override asks ONLY for the missing field', () => {
+    const stored = baseState({ intent: 'SELL_SIDE', sector: 'pharma', m4_questions_asked: true, phase: 'MOMENTUM' });
+    const r = run({ storedState: stored, candidateState: stored, message: 'done', extraction: ext({ is_complete: true }) });
+    expect(r.messageOverride).toMatch(/city, state, or region/i);
+    expect(r.messageOverride).toMatch(/we need/i);
+    expect(r.extraction.message).toBe(r.messageOverride); // flows through buildFinalMessage
+  });
+
+  it('A1c. quality passed, awaiting Yes/No → override is the genuine-mandate question (never a closure)', () => {
+    const stored = full({ quality_gate_passed: true, intent_validated: null, phase: 'INTENT_VALIDATION', turn_count: 4 });
+    const r = run({ storedState: stored, candidateState: stored, message: 'what does that mean?', extraction: ext({ is_complete: false }) });
+    expect(r.messageOverride).toBe(GENUINE_MANDATE_QUESTION);
+    expect(r.messageOverride).not.toMatch(/structured successfully/i);
+  });
+
+  it('A1d. user confirms ("yes") → deal captured → override is the capture confirmation (mentions Deal Log)', () => {
+    const stored = full({ quality_gate_passed: true, intent_validated: null, phase: 'INTENT_VALIDATION', turn_count: 4 });
+    const r = run({ storedState: stored, candidateState: stored, message: 'yes', extraction: ext({ intent_validation: 'yes' }) });
+    expect(r.shouldInsert).toBe(true);
+    expect(r.messageOverride).toBe(CAPTURE_CONFIRMATION);
+    expect(r.messageOverride).toMatch(/Deal Log/);
+  });
+
+  it('A1e. user declines ("no") → override is the soft-decline message, no insert', () => {
+    const stored = full({ quality_gate_passed: true, intent_validated: null, phase: 'INTENT_VALIDATION', turn_count: 4 });
+    const r = run({ storedState: stored, candidateState: stored, message: 'no, just exploring', extraction: ext({ intent_validation: 'no' }) });
+    expect(r.shouldInsert).toBe(false);
+    expect(r.messageOverride).toBe(INTENT_DECLINED_MESSAGE);
+  });
+
+  it('A1f. "structured successfully / we will notify you" NEVER appears before genuine capture', () => {
+    // The exact CHAT-2 bug: sufficient-looking but missing geography → must NOT show the closure speech.
+    const stored = baseState({ intent: 'SELL_SIDE', sector: 'manufacturing', revenue: '₹12 Cr', structure: 'Majority', m4_questions_asked: true, phase: 'MOMENTUM' });
+    const r = run({ storedState: stored, candidateState: stored, message: 'ok', extraction: ext({ is_complete: true }) });
+    expect(r.shouldInsert).toBe(false);                          // not actually complete (no geography)
+    expect(r.extraction.message || '').not.toMatch(/structured successfully/i);
+    expect(r.extraction.message || '').not.toMatch(/notify you/i);
+  });
+});

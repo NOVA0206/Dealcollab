@@ -115,7 +115,7 @@ I will now work to identify the right counterparty for you and surface only rele
 
 If alignment is confirmed and only after your approval, you will be connected.
 
-This process runs continuously in the background, and you'll be notified as relevant matches emerge.`;
+This process runs continuously in the background, and you can track status in your Deal Log.`;
   }
 
   // 3. MOMENTUM SYNTHESIZER (Guard against empty AI output in Momentum Mode)
@@ -131,8 +131,7 @@ This is sufficient to begin identifying relevant opportunities.
 
 I’ll start mapping suitable counterparties.
 
-One quick refinement:
-Are you primarily targeting strategic operators or financial investors for this requirement?`;
+What is the preferred transaction timeline or key criteria for counterparties?`;
   }
 
   // 4. QUALIFICATION FALLBACK (If AI fails during intake)

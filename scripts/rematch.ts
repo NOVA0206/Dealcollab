@@ -41,7 +41,8 @@ async function main() {
     console.log('[REMATCH] Running matchmaking engine...\n');
 
     const result = await executeMatchmaking({
-        mandateId: p.id,
+        id: p.id,
+        mandateId: p.mandate_id,
         userId: p.user_id,
         intent: p.intent,
         raw_text: p.raw_text || '',

@@ -133,6 +133,7 @@ async function main() {
 
             toInsert.push({
                 user_id: m.user_id,
+                mandate_id: m.id,
                 raw_text: cleanText,
                 normalised_text: cleanText,
                 intent: normalizeIntent(m.intent) || m.intent,

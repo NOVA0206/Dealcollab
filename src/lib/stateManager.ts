@@ -21,14 +21,13 @@ import type { RouterState, DealIntent, SectorKey, ConversationPhase } from './ty
 import { VALID_SECTOR_KEYS } from './detectors';
 import {
     detectSectorFromText,
-    detectIntentFromText,
     detectProfileIntentFromText,
     detectIntermediaryFromText,
     detectShellCompanyFromText,
     detectFrictionSignal,
     detectStructureFromText,
+    detectTradingDistribution,
     detectConfirmation,
-    detectIntentFocusFromText,
 } from './detectors';
 
 // ─────────────────────────────────────────────────────────────
@@ -38,7 +37,10 @@ import {
 export function createBlankState(): RouterState {
     return {
         intent: null,
+        intent_flavor: null,
+        intent_locked: false,
         sector: null,
+        industry: null,
         sub_sector: null,
         geography: null,
         deal_size: null,
@@ -58,13 +60,13 @@ export function createBlankState(): RouterState {
         quality_gate_attempted: false,
         intent_validated: null,
         m4_questions_asked: false,
+        is_captured: false,
         phase: 'ENTRY',
         turn_count: 0,
         refinement_count: 0,
         round_count: 0,
         special_conditions: [],
         strategic_intent: null,
-        // NM8: Mandate Verification Framework
         verification_step: null,
         verification_authority: null,
         verification_readiness: null,
@@ -120,7 +122,7 @@ export function computeMissingM3Fields(state: RouterState): number {
 
 export function updateStateFromExtraction(
     current: RouterState,
-    extraction: { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean },
+    extraction: { intent: DealIntent; state: Partial<RouterState>; is_complete: boolean; intent_confidence?: number | null; intent_changed?: boolean },
     currentMessage: string,
     modulesLoaded: string[] = [],
 ): RouterState {
@@ -131,8 +133,36 @@ export function updateStateFromExtraction(
     if (!updated.is_profile_search)
         updated.is_profile_search = detectProfileIntentFromText(currentMessage);
 
-    // Intent
-    if (extraction.intent) updated.intent = extraction.intent;
+    // ── Intent — set once, then LOCK (Piece 3). Stability hierarchy: intent changes only on an
+    //    EXPLICIT goal change, which the model signals with intent_changed=true. This stops the
+    //    silent mid-conversation flips (the Chat 3/7 class of bug) at the state level.
+    const incomingIntent = extraction.intent;
+    const incomingConfidence = extraction.intent_confidence;
+    const explicitChange = extraction.intent_changed === true;
+
+    if (incomingIntent) {
+        if (!current.intent_locked) {
+            updated.intent = incomingIntent;
+            // Lock once committed with adequate confidence. The "<50 → ask" gate means a committed
+            // intent is normally ≥50; if confidence is absent, treat the commit as confident.
+            if (incomingConfidence == null || incomingConfidence >= 50) updated.intent_locked = true;
+        } else if (explicitChange && incomingIntent !== current.intent) {
+            updated.intent = incomingIntent;   // explicit pivot by the user; stays locked
+            console.log(`[STATE] Intent change accepted (explicit): ${current.intent} → ${incomingIntent}`);
+        } else if (incomingIntent !== current.intent) {
+            console.warn(`[STATE] Intent drift ignored — kept ${current.intent} (model emitted ${incomingIntent} with no explicit change)`);
+            // updated.intent stays current.intent (from {...current})
+        }
+    }
+
+    // ── Intent flavor — derived from the EFFECTIVE intent; only meaningful for BUY_SIDE ──
+    if (updated.intent === 'BUY_SIDE') {
+        const f = (extraction.state as Record<string, unknown>).intent_flavor as string | undefined;
+        if (f === 'strategic' || f === 'financial') updated.intent_flavor = f;
+        // model gave no flavor → keep the prior flavor (don't wipe it)
+    } else {
+        updated.intent_flavor = null;  // flavor applies only to BUY_SIDE
+    }
 
     // Sector — validate against VALID_SECTOR_KEYS before accepting
     if (extraction.state.sector) {
@@ -146,6 +176,7 @@ export function updateStateFromExtraction(
     }
 
     // Core deal fields
+    if (extraction.state.industry) updated.industry = extraction.state.industry as string;
     if (extraction.state.sub_sector) updated.sub_sector = extraction.state.sub_sector as string;
     if (extraction.state.geography) updated.geography = extraction.state.geography as string;
     if (extraction.state.deal_size) updated.deal_size = extraction.state.deal_size as string;
@@ -172,15 +203,17 @@ export function updateStateFromExtraction(
         if (detected) updated.is_intermediary = detected;
     }
 
-    // RC12: M4 questions asked — only accept when M4 module was actually loaded
-    if (extraction.state.m4_questions_asked === true) {
-        const m4WasLoaded = modulesLoaded.some(m => m.startsWith('M4_'));
-        if (m4WasLoaded) {
-            updated.m4_questions_asked = true;
-            console.log('[STATE] m4_questions_asked=true accepted.');
-        } else {
-            console.warn('[STATE] Rejected m4_questions_asked=true — M4 not in prompt this turn.');
-        }
+    // Piece 5: M4-asked is SERVER-SET, not model-reported. When M4 is loaded the sector questions
+    // are MANDATORY, and M4 only loads when no gate is suspending it — so if M4 was in the prompt
+    // this turn, it was presented. Marking it here (instead of trusting the model to set the flag,
+    // which it kept forgetting) stops the verbatim re-ask loop seen in Chat 4.
+    const m4WasLoaded = modulesLoaded.some(m => m.startsWith('M4_'));
+    if (m4WasLoaded) {
+        updated.m4_questions_asked = true;
+        console.log('[STATE] m4_questions_asked=true (server-set — M4 was loaded this turn).');
+    } else if (extraction.state.m4_questions_asked === true) {
+        // Model claimed M4 asked but it was not loaded → ignore (honesty guard).
+        console.warn('[STATE] Ignored m4_questions_asked=true — M4 was not in the prompt this turn.');
     }
 
     // Fallback detection from message text
@@ -188,25 +221,23 @@ export function updateStateFromExtraction(
         const detected = detectSectorFromText(currentMessage);
         if (detected) updated.sector = detected;
     }
-    if (!updated.intent) {
-        const detected = detectIntentFromText(currentMessage);
-        if (detected) updated.intent = detected;
-    }
-    if (!updated.intent_focus) {
-        const detected = detectIntentFocusFromText(currentMessage);
-        if (detected) {
-            updated.intent_focus = detected;
-            updated.strategic_intent = detected;
-            console.log(`[DETECTOR] Strategic rationale detected: ${detected}`);
-        }
-    }
-
-    console.log(`[MANDATE_UPDATED] Mandate state updated on turn ${updated.turn_count}.`);
+    // Intent is no longer guessed from keywords. It is set only by the model's reasoning
+    // (M_INTENT_REASONING). If the model cannot determine it, intent stays null and the
+    // intent-status line instructs the model to ask one short clarifying question — we do
+    // NOT fall back to substring matching, which mislabels by actor/direction.
 
     // RC9: Shell company → set sub_sector
     if (updated.sub_sector === null && detectShellCompanyFromText(currentMessage)) {
         updated.sub_sector = 'shell_company';
         console.log('[DETECTOR] Shell company — sub_sector=shell_company');
+    }
+
+    // B3: Trading/distribution is NOT manufacturing. Flag the sub_sector so M4 asks trade
+    // questions (suppliers, product range, customers, margins) instead of plant/capacity questions.
+    if (updated.sector === 'manufacturing' && updated.sub_sector === null &&
+        detectTradingDistribution(currentMessage)) {
+        updated.sub_sector = 'trading_distribution';
+        console.log('[DETECTOR] Manufacturing sub_sector: trading_distribution');
     }
 
     // RC16 (updated for NM1): Healthcare sub_sector auto-detection
@@ -264,15 +295,6 @@ export function updateStateFromExtraction(
         console.log('[STATE] Document confirmed — is_complete=true');
     } else {
         updated.is_complete = extraction.is_complete;
-    }
-
-    // Phase 1: auto-mark M4 when user provided rich sector intel upfront (≥2 non-trivial fields)
-    // Prevents blocking users who answer M4 questions before being asked them.
-    const richM4FieldCount = Object.values(updated.industry_data || {})
-      .filter(v => typeof v === 'string' && (v as string).trim().length > 3).length;
-    if (richM4FieldCount >= 2 && !updated.m4_questions_asked) {
-      updated.m4_questions_asked = true;
-      console.log(`[STATE] Rich industry_data (${richM4FieldCount} fields) — auto-marking m4_questions_asked=true`);
     }
 
     // Sufficiency gate — sub_sector only required for healthcare sector
@@ -333,6 +355,7 @@ export function initializeStateFromDocument(structuredData: Record<string, unkno
         state.sector = validKey || detectSectorFromText(sectorStr);
     }
     if (location) state.geography = location;
+    if (structuredData.industry) state.industry = String(structuredData.industry);
     if (structuredData.sub_sector) state.sub_sector = String(structuredData.sub_sector);
     if (structuredData.deal_size) state.deal_size = String(structuredData.deal_size);
     if (structuredData.revenue) state.revenue = String(structuredData.revenue);
@@ -427,12 +450,42 @@ export function initializeStateFromDocument(structuredData: Record<string, unkno
 // RESOLVE PHASE — pure function, state → phase
 // ─────────────────────────────────────────────────────────────
 
+// B1: Geography must be asked upfront when missing. The OLD gate also required
+// phase === 'QUALIFICATION', but on the first user turn the phase can still read 'ENTRY',
+// so the gate never fired and geography was skipped until the very end. This deterministic
+// check fires on the opening round whenever geography is missing and we already know enough
+// to be qualifying (intent or sector).
+export function shouldAskGeographyFirst(state: RouterState): boolean {
+    return !state.geography && state.round_count === 0 && !!(state.intent || state.sector);
+}
+
+// B2: business-model gate. Fires when we still don't understand WHAT the business does — i.e. no
+// true industry captured AND the coarse sector is unset or the catch-all "mixed" — even if
+// geography is already known. Bounded to early rounds to avoid loops, and suppressed when the
+// geography gate (B1) is already handling the "what does the business do" ask this turn.
+export function shouldAskBusinessModelFirst(state: RouterState): boolean {
+    const modelUnclear = !state.industry && (!state.sector || state.sector === 'mixed');
+    return (
+        modelUnclear &&
+        !!state.intent &&
+        state.round_count < 2 &&
+        !shouldAskGeographyFirst(state)
+    );
+}
+
 export function resolvePhase(state: RouterState): ConversationPhase {
     if (state.is_profile_search) return 'PROFILE_SEARCH';
 
-    // NM8: Mandate verification in progress — hold phase until complete
-    if (state.quality_gate_passed && state.intent_validated === null && state.phase === 'MANDATE_VERIFICATION') return 'MANDATE_VERIFICATION';
-    // NM7: Legacy intent confirmation (backward compat for existing sessions)
+    // NM8: Mandate verification in progress — hold phase until complete.
+    // Triggers on EITHER phase=MANDATE_VERIFICATION OR verification_step being mid-flow.
+    // The second check survives friction-layer-2 resetting phase to CLOSURE.
+    const inNM8Active = state.quality_gate_passed && state.intent_validated === null &&
+      (!!state.verification_step && state.verification_step !== 'COMPLETE');
+    if (inNM8Active || (state.quality_gate_passed && state.intent_validated === null && state.phase === 'MANDATE_VERIFICATION')) {
+      return 'MANDATE_VERIFICATION';
+    }
+
+    // NM7: Legacy binary confirmation (backward compat for sessions without verification_step)
     if (state.quality_gate_passed && state.intent_validated === null) return 'INTENT_VALIDATION';
     // NM7: User declined — soft close
     if (state.quality_gate_passed && state.intent_validated === false) return 'CLOSURE';

@@ -20,11 +20,15 @@ import {
   initializeStateFromDocument,
   resolvePhase,
   computeMissingM3Fields,
+  shouldAskBusinessModelFirst,
 } from './stateManager';
 import { computeQualityGate } from './qualityGate';
 import type { QualityGateResult } from './qualityGate';
 import { M0_OUTPUT_SCHEMA, PRE_FLIGHT_EXTRACTION } from './M0_outputSchema';
 import { M1_CORE_IDENTITY } from './M1_coreIdentity';
+import { M_INTENT_REASONING } from './M_intentReasoning';
+import { M_COGNITIVE_QUALIFICATION } from './M_cognitiveQualification';
+import { buildIntentFraming } from './intentFraming';
 import { M2_PHASE_RULES } from './M2_phaseRules';
 import { M3_MODULES } from './M3_intentFrameworks';
 import { M4_MODULES, M4_SHELL } from './M4_sectorIntel';
@@ -80,6 +84,7 @@ export function buildSystemPrompt(
   modules.push({ key: 'M0_output_schema', content: M0_OUTPUT_SCHEMA });
   modules.push({ key: 'M1_core_identity', content: M1_CORE_IDENTITY });
   modules.push({ key: 'M2_phase_rules', content: M2_PHASE_RULES });
+  modules.push({ key: 'M_intent_reasoning', content: M_INTENT_REASONING });
 
   // ── Special modes (mutually exclusive, highest priority) ───
   if (state.is_profile_search || state.phase === 'PROFILE_SEARCH') {
@@ -110,6 +115,11 @@ export function buildSystemPrompt(
 
   } else {
     // ── Standard qualification flow ──────────────────────────
+
+
+    // Part 1: the gap-analysis brain governs HOW M3/M4 are used. Loads first so it overrides
+    // the rigid "ask these / MANDATORY" framing those modules still carry.
+    modules.push({ key: 'M_cognitive_qualification', content: M_COGNITIVE_QUALIFICATION });
 
     if (state.intent && M3_MODULES[state.intent]) {
       modules.push({ key: `M3_${state.intent}`, content: M3_MODULES[state.intent] });
@@ -175,6 +185,15 @@ export function buildSystemPrompt(
     ? `# GEOGRAPHY_GATE: active — ask ONLY geography question. M4 suspended.`
     : `# GEOGRAPHY_GATE: clear`;
 
+  // B2: business-model gate — geography may be known, but we still don't know what the business does.
+  const businessModelGateLine = shouldAskBusinessModelFirst(state)
+    ? `# BUSINESS_MODEL_GATE: active — the business model is still unclear (we do not yet know what the company actually does or how it earns money). This turn, ask plainly what the company does — its main products or services, who its customers are, and how it makes money. Do NOT ask sector-specific, capacity, or plant questions yet. M4 suspended.`
+    : `# BUSINESS_MODEL_GATE: clear`;
+
+  // B4: hard cap on questions per message — never dump a checklist.
+  const questionLimitLine = `# QUESTION_LIMIT: Ask at most 2–3 questions in a single message, grouped into one natural paragraph. NEVER present a long list of questions or more than 3 at once. If more than 3 things are missing, ask the 2–3 most important now and the rest on the next turn.`;
+
+
   const shellQueryLine = state.is_shell_query
     ? `# SHELL_QUERY: true — include shell proposals in matches.`
     : `# SHELL_QUERY: false — exclude shell proposals from matches.`;
@@ -221,9 +240,32 @@ export function buildSystemPrompt(
     state.mandate_confidence_score !== null ? `# MANDATE_CONFIDENCE_SCORE: ${state.mandate_confidence_score} | TIER: ${state.mandate_confidence_tier}` : '',
   ].filter(Boolean) : [];
 
+  const intentStatusLine = state.intent
+    ? (state.intent_flavor
+      ? `# INTENT_STATUS: ${state.intent} (${state.intent_flavor}) — ESTABLISHED`
+      : `# INTENT_STATUS: ${state.intent} — ESTABLISHED`)
+    : [
+        `# INTENT_STATUS: NOT YET DETERMINED`,
+        `# Do NOT use any intent-specific opening line`
+      ].join('\n');
+
+  const framing = buildIntentFraming(state.intent, state.intent_flavor);
+  const openerLine = framing.opener
+    ? [
+        `# OPENING LINE — MANDATORY: You MUST start your response with exactly this opening line:`,
+        `# "${framing.opener}"`,
+        `# Do NOT change it, and do NOT use any other opener.`
+      ].join('\n')
+    : [
+        `# OPENING LINE: Since the client intent is not yet determined, use a neutral opener.`,
+        `# Do NOT use any intent-specific opening line.`
+      ].join('\n');
+
   const phaseContext = [
     `\n# CURRENT CONVERSATION PHASE: ${state.phase}`,
     `# CURRENT INTENT: ${state.intent ?? 'unknown'}`,
+    intentStatusLine,
+    openerLine,
     `# TURN: ${state.turn_count + 1} | REFINEMENTS USED: ${state.refinement_count}/3`,
     `# M4 QUESTIONS ASKED THIS SESSION: ${state.m4_questions_asked}`,
     `# MODULES IN THIS PROMPT: ${modules.map(m => m.key).join(', ')}`,
@@ -235,6 +277,8 @@ export function buildSystemPrompt(
     documentIntakeLine,
     gatewayLine,
     geoGateLine,
+    businessModelGateLine,
+    questionLimitLine,
     shellQueryLine,
     qualityGateLine,
     intentValidatedLine,

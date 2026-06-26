@@ -271,7 +271,7 @@ export function detectConfirmation(message: string, aiField?: string | null): Co
     const t = message.toLowerCase().trim();
 
     const saysNo =
-        /\bnot\b|\bno\b|\bnope\b|\bnever\b|\bcancel\b|\bnegative\b|\bexploring\b|\bjust looking\b|\bwrong\b|\bchange\b|\bmodif\w*/i.test(t) ||
+        /\bnot\b|\bno\b|\bnope\b|\bnever\b|\bcancel\b|\bnegative\b|\bexploring\b|\bjust looking\b|\bwrong\b/i.test(t) ||
         /n['’]t\b/i.test(t); // don't / isn't / won't / aren't
     if (saysNo) return 'no';
 
@@ -280,7 +280,9 @@ export function detectConfirmation(message: string, aiField?: string | null): Co
     if (ai === 'no') return 'no';
 
     const saysYes =
-        /\byes\b|\byeah\b|\byep\b|\bconfirm\w*|\bgenuine\b|\bcorrect\b|\baccurate\b|\bproceed\b|\bgo ahead\b|\bactivate\b|\bregister\b|\babsolutely\b|\bsure\b|\baffirmative\b|\bit is\b|\breal\b|\bright\b|\blooks good\b|\blooks right\b|\bapproved?\b/i.test(t);
+        // yes/yeah/yep accept trailing repeated chars ("yesss", "yeahhh", "yepp") — word boundaries
+        // still prevent "yesterday", "layer", "type" from matching.
+        /\byes+\b|\byea+h*\b|\byep+\b|\bconfirm\w*|\bgenuine\b|\bcorrect\b|\baccurate\b|\bproceed\b|\bgo ahead\b|\bactivate\b|\bregister\b|\babsolutely\b|\bsure\b|\baffirmative\b|\bit is\b|\breal\b|\bright\b|\blooks good\b|\blooks right\b|\bsounds? (?:good|right|correct|accurate)\b|\bthat'?s (?:right|correct|accurate)\b/i.test(t);
     if (saysYes) return 'yes';
 
     return null;
@@ -460,7 +462,7 @@ export function detectVerificationReadiness(text: string): string | null {
 // Returns ['NONE_AVAILABLE'] when user indicates no materials.
 export function detectVerificationMaterials(text: string): string[] {
     const t = text.toLowerCase();
-    if (/\b(6|none|no|nothing|not yet|n\/a|not available|don[''']?t have)\b/.test(t)) return ['NONE_AVAILABLE'];
+    if (/\b(6|none|no|nothing|not yet|n\/a|not available|don[''' ]?t have)\b/.test(t)) return ['NONE_AVAILABLE'];
     const mats: string[] = [];
     if (/\b(cim|confidential information|info memo)\b/.test(t) || /\b1\b/.test(t)) mats.push('CIM');
     if (/\bteaser\b/.test(t) || /\b2\b/.test(t)) mats.push('TEASER');
@@ -503,4 +505,29 @@ export function detectGatewaySector(text: string, sector: SectorKey | null): str
     }
 
     return null;
+}
+
+// B3: Trading / distribution detection.
+// A trader/distributor is NOT a manufacturer — it must never be asked factory questions
+// (installed capacity, utilisation, plant certifications). Fires only when trading signals
+// are present AND there is no manufacturing signal.
+const TRADING_DISTRIBUTION_SIGNALS = [
+    'trading', 'trader', 'distributor', 'distribution business', 'distributorship',
+    'wholesaler', 'wholesale', 'reseller', 'dealer', 'dealership', 'stockist',
+    'supplier of', 'we supply', 'we trade', 'we distribute', 'we resell',
+    'import and sell', 'buy and sell', 'channel partner', 'sourcing and supply',
+];
+const MANUFACTURING_NEGATION = [
+    'manufactur', 'we make', 'we produce', 'production line', 'our plant', 'our factory',
+    'our facility', 'assembly line', 'fabricat', 'machining', 'casting', 'forging', 'foundry',
+];
+export function detectTradingDistribution(text: string): boolean {
+    const lower = text.toLowerCase();
+    const hasTrading = TRADING_DISTRIBUTION_SIGNALS.some(s => lower.includes(s));
+    const hasManufacturing = MANUFACTURING_NEGATION.some(s => lower.includes(s));
+    if (hasTrading && !hasManufacturing) {
+        console.log('[DETECTOR] Trading/distribution business (not manufacturing)');
+        return true;
+    }
+    return false;
 }

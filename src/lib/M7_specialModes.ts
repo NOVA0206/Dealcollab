@@ -21,11 +21,11 @@ Is this a genuine mandate? Reply Yes to activate matching, or No if you're curre
 
 Set is_complete=false in your JSON. Wait for response.
 
-When user replies YES (or "yes", "confirm", "genuine", "correct", "it is", "absolutely"):
-→ Set is_complete=true in your JSON output.
+When user replies YES (or "yes", "yess", "yesss", "yeahh", "confirm", "genuine", "correct", "it is", "absolutely", "sure", "looks good", "sounds right", or any affirmative variation):
+→ Set is_complete=true AND intent_validation="yes" in your JSON output. Do not ask again.
 
 When user replies NO (or "no", "not yet", "exploring", "just looking"):
-→ Set is_complete=false. Deliver this message verbatim:
+→ Set is_complete=false AND intent_validation="no". Deliver this message verbatim:
 "Understood. Exploratory queries are welcome — this is how many deals begin.
 Your session is saved. Return when you're ready to submit a confirmed mandate, and we'll activate matching immediately."
 `.trim();

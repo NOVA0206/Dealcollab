@@ -2,10 +2,23 @@ import { auth } from '@/auth';
 import { createServerSupabaseClient } from '@/utils/supabase/server';
 import { NextResponse } from 'next/server';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/deals
+//
+// Returns the authenticated user's chat-created proposals with their matches.
+//
+// Single nested-SELECT query — no .in() with ID arrays, so no URL overflow.
+// PostgREST resolves proposal_matches!proposal_id via FK on the server side.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAGE_LIMIT = 100;
+
 export async function GET() {
+  const start = Date.now();
+
   try {
     const session = await auth();
     if (!session?.user?.email) {
@@ -13,7 +26,7 @@ export async function GET() {
     }
 
     const supabase = createServerSupabaseClient();
-    if (!supabase) throw new Error("Supabase client failed to initialize");
+    if (!supabase) throw new Error('Supabase client failed to initialize');
 
     const { data: dbUser, error: userErr } = await supabase
       .from('users')
@@ -25,8 +38,10 @@ export async function GET() {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Fetch user's proposals
-    const { data: userProposals, error: proposalsErr } = await supabase
+    // Single query: proposals + their matches + counterparty data
+    // Uses PostgREST relational embedding (server-side JOIN) — eliminates .in() array.
+    // Disambiguation: !proposal_id selects the FK to proposals from proposal_matches.
+    const { data: rawProposals, error: proposalsErr } = await supabase
       .from('proposals')
       .select(`
         id,
@@ -40,84 +55,92 @@ export async function GET() {
         raw_text,
         normalised_text,
         summary_text,
-        metadata
+        metadata,
+        proposal_matches!proposal_id (
+          id,
+          final_score,
+          similarity_score,
+          match_reason,
+          matched_proposal_id,
+          matched_proposal:proposals!matched_proposal_id (
+            id,
+            intent,
+            sectors,
+            geographies,
+            deal_size_min_cr,
+            deal_size_max_cr,
+            deal_structure,
+            raw_text,
+            normalised_text,
+            summary_text,
+            metadata
+          )
+        )
       `)
       .eq('user_id', dbUser.id)
       .eq('status', 'ACTIVE')
-      .order('created_at', { ascending: false });
+      .neq('source', 'bulk_upload')
+      .order('created_at', { ascending: false })
+      .limit(PAGE_LIMIT);
 
-    if (proposalsErr) throw proposalsErr;
-
-    if (!userProposals || userProposals.length === 0) {
-      return NextResponse.json([]);
+    if (proposalsErr) {
+      console.error('[GET /api/deals] Query error:', proposalsErr.message);
+      throw proposalsErr;
     }
 
-    // Fetch matches for these proposals
-    const proposalIds = userProposals.map((p) => p.id);
-    
-    // We do a join with matched_proposal_id to get the counterparty data
-    const { data: matchesData, error: matchesErr } = await supabase
-      .from('proposal_matches')
-      .select(`
-        id,
-        proposal_id,
-        similarity_score,
-        final_score,
-        match_reason,
-        matched_proposal_id,
-        matched_proposal:proposals!matched_proposal_id (
-          id,
-          intent,
-          sectors,
-          geographies,
-          deal_size_min_cr,
-          deal_size_max_cr,
-          deal_structure,
-          raw_text,
-          normalised_text,
-          summary_text,
-          metadata
-        )
-      `)
-      .in('proposal_id', proposalIds)
-      .order('final_score', { ascending: false });
+    const proposals = rawProposals ?? [];
+    console.log(`[GET /api/deals] userId=${dbUser.id} | proposals=${proposals.length} | ${Date.now() - start}ms`);
 
-    if (matchesErr) throw matchesErr;
+    // Transform: flatten proposal_matches into the shape the frontend expects
+    const result = proposals.map((proposal) => {
+      const rawMatches = (proposal.proposal_matches ?? []) as Array<{
+        id: string;
+        final_score: string;
+        similarity_score: string;
+        match_reason: string;
+        matched_proposal_id: string;
+        matched_proposal: unknown;
+      }>;
 
-    // Hydrate the proposals with their matches
-    const hydratedDeals = userProposals.map((proposal) => {
-      const proposalMatches = (matchesData || []).filter((m) => m.proposal_id === proposal.id).map(m => {
-        const cp = Array.isArray(m.matched_proposal) ? m.matched_proposal[0] : m.matched_proposal;
+      // Sort matches by score descending (PostgREST does not guarantee nested order)
+      const sortedMatches = [...rawMatches].sort(
+        (a, b) => parseFloat(b.final_score) - parseFloat(a.final_score),
+      );
+
+      const matches = sortedMatches.map((m) => {
+        const cp = (Array.isArray(m.matched_proposal) ? m.matched_proposal[0] : m.matched_proposal) as Record<string, unknown> | null;
         return {
           id: m.id,
           score: m.final_score,
           similarity: m.similarity_score,
           reason: m.match_reason,
           matchedProposalId: m.matched_proposal_id,
-          counterparty: cp ? {
-            intent: cp.intent,
-            sectors: cp.sectors,
-            geographies: cp.geographies,
-            size_min: cp.deal_size_min_cr,
-            size_max: cp.deal_size_max_cr,
-            raw_text: cp.raw_text,
-            normalised_text: cp.normalised_text,
-            summary_text: cp.summary_text as string | null ?? null,
-            mandate_summary: (cp.metadata as Record<string, unknown> | null)?.mandate_summary as string | null ?? null,
-          } : null
+          counterparty: cp
+            ? {
+                intent: cp.intent as string,
+                sectors: cp.sectors as string[],
+                geographies: cp.geographies as string[],
+                size_min: cp.deal_size_min_cr,
+                size_max: cp.deal_size_max_cr,
+                raw_text: cp.raw_text as string | null,
+                normalised_text: cp.normalised_text as string | null,
+                summary_text: (cp.summary_text as string | null) ?? null,
+                mandate_summary:
+                  ((cp.metadata as Record<string, unknown> | null)?.mandate_summary as string | null) ?? null,
+              }
+            : null,
         };
       });
 
-      return {
-        ...proposal,
-        matches: proposalMatches
-      };
+      // Exclude proposal_matches from the spread to avoid sending raw nested data
+      const { proposal_matches: _ignored, ...proposalFields } = proposal as typeof proposal & { proposal_matches?: unknown };
+      return { ...proposalFields, matches };
     });
 
-    return NextResponse.json(hydratedDeals);
+    return NextResponse.json(result);
   } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error("🔥 GET /api/deals ERROR:", error);
-    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[GET /api/deals] ERROR after ${Date.now() - start}ms:`, msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

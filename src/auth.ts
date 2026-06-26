@@ -27,13 +27,13 @@ const adapter = DrizzleAdapter(db, {
 
 console.log("[AUTH] SESSION STRATEGY: jwt");
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const { handlers, auth: originalAuth, signIn, signOut } = NextAuth({
   adapter,
   secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
   basePath: "/api/auth",
   ...authConfig,
   trustHost: true,
-  debug: true, // Enabled for production debugging
+  debug: process.env.NODE_ENV === 'development',
   logger: {
     error(error) {
       console.error("NEXTAUTH ERROR:", error);
@@ -182,3 +182,47 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 });
+
+export { handlers, signIn, signOut };
+
+export const auth = (async (...args: unknown[]) => {
+  try {
+    const fn = originalAuth as (...args: unknown[]) => Promise<unknown>;
+    return await fn(...args);
+  } catch (error: unknown) {
+    console.error("[AUTH WRAPPER] Caught authentication error:", error);
+
+    const err = error as Record<string, unknown> | null | undefined;
+    const errMsg = String(err?.message || "");
+    const errStack = String(err?.stack || "");
+    const errCode = String(err?.code || "");
+    const errType = String(err?.type || "");
+    // NextAuth wraps the JWE error: outer has type:'JWTSessionError', inner cause has code:'ERR_JWE_INVALID'
+    const causeCode = String((err?.cause as Record<string, unknown>)?.code || "");
+    const causeErr = (err?.cause as Record<string, unknown>)?.err;
+    const causeErrCode = String((causeErr as Record<string, unknown>)?.code || "");
+
+    if (
+      errType === "JWTSessionError" ||
+      errMsg.includes("JWTSessionError") ||
+      errStack.includes("JWEInvalid") ||
+      errCode === "ERR_JWE_INVALID" ||
+      causeCode === "ERR_JWE_INVALID" ||
+      causeErrCode === "ERR_JWE_INVALID"
+    ) {
+      console.warn("[AUTH WRAPPER] Invalid compact JWE token detected, attempting to clear session cookies.");
+      try {
+        const { cookies } = await import('next/headers');
+        const cookieStore = await cookies();
+        cookieStore.delete('authjs.session-token');
+        cookieStore.delete('next-auth.session-token');
+        cookieStore.delete('__Secure-authjs.session-token');
+        cookieStore.delete('__Secure-next-auth.session-token');
+        console.log("[AUTH WRAPPER] Stale cookies deleted successfully.");
+      } catch (cookieErr) {
+        console.warn("[AUTH WRAPPER] Failed to delete cookies automatically:", cookieErr);
+      }
+    }
+    return null;
+  }
+}) as unknown as typeof originalAuth;

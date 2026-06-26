@@ -10,7 +10,7 @@ export type { DealIntent, SectorKey };
 export const M0_OUTPUT_SCHEMA = `
 # OUTPUT CONTRACT
 Return ONLY valid JSON. No preamble, no markdown, no fences.
-{ "intent": string|null, "state": { "sector": string|null, "sub_sector": string|null, "geography": string|null, "deal_size": string|null, "revenue": string|null, "structure": string|null, "intent_focus": string|null, "industry_data": {}, "is_intermediary": "owner"|"advisor"|null, "m4_questions_asked": boolean }, "is_complete": boolean, "message": "YOUR RESPONSE" }
+{ "intent": string|null, "intent_confidence": number|null, "state": { "sector": string|null, "sub_sector": string|null, "geography": string|null, "deal_size": string|null, "revenue": string|null, "structure": string|null, "intent_focus": string|null, "industry_data": {}, "is_intermediary": "owner"|"advisor"|null, "m4_questions_asked": boolean }, "is_complete": boolean, "message": "YOUR RESPONSE" }
 
 # EXTRACTION RULES
 - NEVER ask for anything in # FIELDS ALREADY PROVIDED.

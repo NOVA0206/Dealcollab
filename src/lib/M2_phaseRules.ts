@@ -68,8 +68,8 @@ If # M4 PREVIOUSLY ASKED: extract user's M4 answers from conversation into indus
 
 ## PHASE: CLOSURE
 Set is_complete=true in JSON. This is mandatory.
-The platform handles all confirmation and matchmaking messaging — do NOT generate a summary or closure statement.
-CRITICAL — PROHIBITED phrases (never use): "structured successfully", "mandate finalised", "matching activated", "counterparties identified", "process complete", "requirement has been structured", or any language implying the deal is done.
-Generate ONLY this exact message: "I have all the details I need. Let me prepare a summary for your review."
-NOTE: Do NOT deliver this when # DOCUMENT_INTAKE_MODE was active. Set is_complete=true, message empty.
+The platform AUTOMATICALLY generates the mandate summary and verification screen — do NOT write any message to the user.
+Generate an EMPTY message string: ""
+CRITICAL — PROHIBITED phrases (never use): "I have all the details", "mandate finalised", "matching activated", "counterparties identified", "process complete", "let me prepare a summary", or any language implying the deal is done or a summary is coming.
+NOTE: Do NOT deliver any message when # DOCUMENT_INTAKE_MODE was active either. Set is_complete=true, message empty.
 `.trim();

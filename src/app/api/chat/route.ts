@@ -1,6 +1,9 @@
 // src/app/api/chat/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
+import { db } from '@/db';
+import { users } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import {
   normalizeIntent,
   normalizeSize,
@@ -150,36 +153,52 @@ export async function POST(req: NextRequest) {
     // ─── USER RESOLUTION ─────────────────────────────────────
     let userId = session.user.id;
 
-    const { data: dbUser, error: userCheckErr } = await supabase
-      .from("users")
-      .select("id")
-      .eq("id", userId)
-      .single();
+    console.log(`[USER RESOLUTION] Resolving user. session.user.id=${userId}, email=${session.user.email}`);
 
-    if (userCheckErr || !dbUser) {
-      console.log("User ID mismatch or missing in public.users, attempting email lookup...");
-      const { data: userByEmail } = await supabase
-        .from("users")
-        .select("id")
-        .eq("email", session.user.email)
-        .single();
+    const isValidUUID = (str: string) => {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(str);
+    };
 
-      if (userByEmail) {
-        userId = userByEmail.id;
+    let dbUser = null;
+    if (isValidUUID(userId)) {
+      dbUser = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+    }
+
+    if (!dbUser) {
+      console.log(`[USER RESOLUTION] User ID ${userId} is not found or invalid in DB. Attempting email lookup for ${session.user.email}...`);
+      if (session.user.email) {
+        dbUser = await db.query.users.findFirst({
+          where: eq(users.email, session.user.email),
+        });
+
+        if (dbUser) {
+          userId = dbUser.id;
+          console.log(`[USER RESOLUTION] Found user by email: ${userId}`);
+        } else {
+          console.log(`[USER RESOLUTION] Email lookup failed. Inserting new user row...`);
+          const inserted = await db.insert(users).values({
+            email: session.user.email,
+            name: session.user.name || session.user.email.split('@')[0],
+            source: 'web',
+          })
+          .onConflictDoUpdate({
+            target: users.email,
+            set: { name: session.user.name || session.user.email.split('@')[0] },
+          })
+          .returning({ id: users.id });
+
+          if (inserted && inserted[0]) {
+            userId = inserted[0].id;
+            console.log(`[USER RESOLUTION] Insert/upsert successful: ${userId}`);
+          } else {
+            throw new Error("Could not resolve valid user_id for chat persistence: database insert failed");
+          }
+        }
       } else {
-        const { data: newUser } = await supabase
-          .from("users")
-          .upsert(
-            {
-              email: session.user.email,
-              name: session.user.name || session.user.email?.split('@')[0],
-            },
-            { onConflict: 'email' },
-          )
-          .select('id')
-          .single();
-        if (newUser) userId = newUser.id;
-        else throw new Error("Could not resolve valid user_id for chat persistence");
+        throw new Error(`Could not resolve valid user_id for chat persistence: session user ID is invalid/missing and email is not provided.`);
       }
     }
 
@@ -532,12 +551,10 @@ export async function POST(req: NextRequest) {
     if (!storedState.intent && updatedState.intent) {
       console.log(`[INTENT_CAPTURED] First intent detection | intent: ${updatedState.intent} | sector: ${updatedState.sector ?? 'unknown'} | turn: ${updatedState.turn_count}`);
     }
-    if (updatedState.phase === 'MANDATE_VERIFICATION' && updatedState.verification_step === 'CONFIRMATION' && storedState.phase !== 'MANDATE_VERIFICATION') {
-      console.log(`[MANDATE_STRUCTURED] Quality gate passed — summary shown | score: ${updatedState.quality_score}/10 | intent: ${updatedState.intent} | sector: ${updatedState.sector}`);
-    } else if (updatedState.phase === 'MANDATE_VERIFICATION' && (updatedState.verification_step === 'AUTHORITY' || updatedState.verification_step === 'READINESS') && storedState.verification_step === 'CONFIRMATION') {
-      console.log(`[VERIFICATION_STARTED] User confirmed summary — verification active | step: ${updatedState.verification_step}`);
-    } else if (updatedState.intent_validated === true && updatedState.is_complete) {
-      console.log(`[MATCHMAKING_ACTIVATED] Verification complete — matchmaking firing | intent: ${updatedState.intent} | sector: ${updatedState.sector} | confidence: ${updatedState.mandate_confidence_score ?? 'n/a'}`);
+    if (updatedState.phase === 'INTENT_VALIDATION' && storedState.phase !== 'INTENT_VALIDATION') {
+      console.log(`[MANDATE_STRUCTURED] Quality gate passed — confirmation shown | score: ${updatedState.quality_score}/10 | intent: ${updatedState.intent} | sector: ${updatedState.sector}`);
+    } else if (updatedState.intent_validated === true && updatedState.is_complete && !storedState.is_complete) {
+      console.log(`[MATCHMAKING_ACTIVATED] Verification complete — matchmaking firing | intent: ${updatedState.intent} | sector: ${updatedState.sector}`);
     } else if (!updatedState.is_complete && updatedState.sector) {
       console.log(`[MANDATE_UPDATED] Fields updated | intent: ${updatedState.intent ?? 'null'} | sector: ${updatedState.sector} | phase: ${updatedState.phase} | turn: ${updatedState.turn_count}`);
     }

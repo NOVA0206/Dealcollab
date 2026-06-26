@@ -35,7 +35,8 @@ export async function POST(
         await supabase.from('proposal_matches').delete().eq('proposal_id', proposalID);
 
         const result = await executeMatchmaking({
-            mandateId: p.id,
+            id: p.id,
+            mandateId: p.mandate_id,
             userId: p.user_id,
             intent: p.intent,
             raw_text: p.raw_text || '',

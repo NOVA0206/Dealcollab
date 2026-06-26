@@ -42,6 +42,10 @@ import {
 import { computeQualityGate } from './qualityGate';
 import { updateStateFromExtraction } from './stateManager';
 import type { RouterState, DealIntent } from './types';
+export const GENUINE_MANDATE_QUESTION = "To confirm this transaction is genuine and goes live on our matching network, please reply YES. Once confirmed, we will begin scanning for counterparties.";
+export const INTENT_DECLINED_MESSAGE = "Understood. Let's modify the details. What would you like to change?";
+export const CAPTURE_CONFIRMATION = "✓ Requirement captured. Your mandate is now active in your Deal Log, and matchmaking has been scan-activated.";
+export const TERMINAL_STATUS_LINE = "This mandate is already captured and active in your Deal Log.";
 
 // LLM extraction shape, as route.ts treats it.
 export interface Extraction {
@@ -79,6 +83,7 @@ export interface ResolveCompletionResult {
   hasFriction: boolean;
   m4GuardFired: boolean;
   reason:
+  | 'already-captured'
   | 'friction'
   | 'rc8-4turn-autoclose'
   | 'llm-extraction'
@@ -164,24 +169,7 @@ function deriveAuthorityFromRole(role: 'owner' | 'advisor' | null): string | nul
   return null;
 }
 
-// ── Shared question text constants — used by advanceMandateVerification and STEP A ──
 
-const AUTHORITY_QUESTION_TEXT = [
-  'To ensure counterparty quality and avoid irrelevant introductions, we verify transaction intent before activating our matching network.',
-  '',
-  '**What best describes your relationship to this transaction?**',
-  '',
-  '1. Founder / Promoter',
-  '2. Owner / Shareholder',
-  '3. Board Member',
-  '4. Corporate Development Team',
-  '5. Investment Banker / Advisor',
-  '6. PE / VC Representative',
-  '7. Authorised Mandate Holder',
-  '8. Just Exploring',
-  '',
-  'Reply with the number, or a brief description.',
-].join('\n');
 
 const READINESS_QUESTION_TEXT = [
   '**How soon are you prepared to engage with a relevant counterparty if one is identified?**',
@@ -197,7 +185,7 @@ const READINESS_QUESTION_TEXT = [
 // Stage 2: Mandate Summary — shown when quality gate first passes.
 // Eliminates the false terminal state by replacing generic success messages
 // with a structured confirmation that clearly positions the next step.
-function buildMandateSummaryMessage(state: RouterState): string {
+export function buildMandateSummaryMessage(state: RouterState): string {
   const intentLabels: Record<string, string> = {
     SELL_SIDE: 'Sell Side — Divestiture / Exit',
     BUY_SIDE: 'Buy Side — Acquisition / Investment',
@@ -213,7 +201,7 @@ function buildMandateSummaryMessage(state: RouterState): string {
 
   if (state.intent) lines.push(`**Transaction Type:** ${intentLabels[state.intent] ?? state.intent}`);
   if (state.sector) {
-    const sectorLabel = state.sector.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const sectorLabel = state.sector.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
     const sub = state.sub_sector && state.sub_sector !== 'shell_company'
       ? ` (${state.sub_sector.replace(/_/g, ' ')})`
       : '';
@@ -228,7 +216,15 @@ function buildMandateSummaryMessage(state: RouterState): string {
   }
 
   lines.push('');
-  lines.push('Is this accurate? Reply **Yes** to proceed, or tell me what to correct.');
+  lines.push('---');
+  lines.push('');
+  lines.push('**Before activating this mandate, please confirm:**');
+  lines.push('');
+  lines.push('1. The information above is accurate.');
+  lines.push('2. This is a genuine business requirement.');
+  lines.push('3. You wish to publish this mandate to the DealCollab matching network.');
+  lines.push('');
+  lines.push('Reply **YES ACTIVATE** to confirm and begin matching, or **EDIT** to make a correction.');
 
   return lines.join('\n');
 }
@@ -238,7 +234,6 @@ function buildVerificationSuccessMessage(
   tier: string,
   intent: string | null,
   sector: string | null,
-  score: number,
 ): string {
   const tierLabel = tier === 'VERIFIED' ? 'Verified Mandate' : 'Qualified Mandate';
   const dealContext = intent && sector
@@ -307,25 +302,16 @@ function advanceMandateVerification(
   const step = state.verification_step ?? 'AUTHORITY';
 
   if (step === 'CONFIRMATION') {
-    // Stage 2 → 3: user either confirms the mandate summary or requests corrections.
+    // CONFIRMATION step: user sees the structured mandate summary and replies.
+    // YES → direct activation (no further AUTHORITY/READINESS questions — the
+    //       explicit confirmation is the mandate signal; scoring is pre-set to 80/QUALIFIED).
+    // NO / correction → return to qualification so user can fix details.
     const decision = detectConfirmation(message, null);
     const isYes = decision === 'yes' || detectFrictionSignal(message);
     const isNo = decision === 'no';
 
     if (isYes) {
-      const prefilledAuthority = deriveAuthorityFromRole(state.is_intermediary);
-      if (prefilledAuthority && !state.verification_authority) {
-        state.verification_authority = prefilledAuthority;
-        state.verification_step = 'READINESS';
-        console.log(`[MANDATE_CONFIRMED] Mandate summary confirmed | authority pre-filled: ${prefilledAuthority}`);
-        console.log('[VERIFICATION_STARTED] Skipping authority question — proceeding to readiness');
-        extraction.message = READINESS_QUESTION_TEXT;
-      } else {
-        state.verification_step = 'AUTHORITY';
-        console.log('[MANDATE_CONFIRMED] Mandate summary confirmed');
-        console.log('[VERIFICATION_STARTED] Entering authority verification');
-        extraction.message = AUTHORITY_QUESTION_TEXT;
-      }
+      finalizeVerificationDirect(state, extraction);
     } else if (isNo) {
       // User wants to correct something — return to qualification
       state.quality_gate_passed = false;
@@ -379,12 +365,12 @@ function finalizeVerification(state: RouterState, extraction: Extraction): void 
     state.is_complete = true;
     state.phase = 'CLOSURE';
     extraction.is_complete = true;
+    state.is_captured = true;
     console.log(`[MANDATE_APPROVED] intent=${state.intent} sector=${state.sector} score=${confidence.score}`);
     extraction.message = buildVerificationSuccessMessage(
       confidence.tier,
       state.intent,
       state.sector,
-      confidence.score,
     );
   } else {
     console.log(`[VERIFY] Score below threshold (${confidence.score}/100) — nurture mode`);
@@ -402,6 +388,31 @@ function finalizeVerification(state: RouterState, extraction: Extraction): void 
   }
 }
 
+// Direct activation without confidence scoring — used when user explicitly confirms
+// the mandate summary in the CONFIRMATION step. The explicit confirmation is itself
+// the strongest possible signal; additional AUTHORITY + READINESS questions are
+// skipped per the platform design (CONFIRM/EDIT flow, not a full verification quiz).
+function finalizeVerificationDirect(state: RouterState, extraction: Extraction): void {
+  state.verification_step = 'COMPLETE';
+  // Pre-fill authority from role if available; otherwise default to mandate holder
+  if (!state.verification_authority) {
+    state.verification_authority =
+      (state.is_intermediary === 'owner' ? 'OWNER_SHAREHOLDER'
+        : state.is_intermediary === 'advisor' ? 'INVESTMENT_BANKER_ADVISOR'
+          : 'AUTHORIZED_MANDATE_HOLDER');
+  }
+  if (!state.verification_readiness) state.verification_readiness = 'IMMEDIATELY';
+  state.mandate_confidence_score = 80;
+  state.mandate_confidence_tier = 'QUALIFIED';
+  state.intent_validated = true;
+  state.is_complete = true;
+  state.phase = 'CLOSURE';
+  extraction.is_complete = true;
+  state.is_captured = true;
+  console.log(`[MANDATE_CONFIRMED_DIRECT] Mandate summary confirmed — activating | intent=${state.intent} sector=${state.sector}`);
+  extraction.message = buildVerificationSuccessMessage('QUALIFIED', state.intent, state.sector);
+}
+
 // Phase 3.2: confirmation logic moved to detectors.detectConfirmation (one shared,
 // negation-aware detector used by both intent-validation and document synthesis).
 
@@ -414,6 +425,26 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
 
   let messageOverride: string | null = null;
   let m4GuardFired = false;
+
+  if (storedState.is_captured) {
+    return {
+      state: {
+        ...storedState,
+        is_complete: true,
+        phase: 'CLOSURE',
+      },
+      extraction: {
+        ...extraction,
+        is_complete: true,
+        message: TERMINAL_STATUS_LINE,
+      },
+      shouldInsert: false,
+      messageOverride: TERMINAL_STATUS_LINE,
+      hasFriction: false,
+      m4GuardFired: false,
+      reason: 'already-captured',
+    };
+  }
 
   // ── Friction layer 2 (route L273–278) ──────────────────────────────────────
   // Patches storedState BEFORE extraction. Also affects the MOMENTUM-lock check below,
@@ -486,7 +517,8 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
   if (
     updatedState.turn_count >= 4 &&
     (updatedState.intent || updatedState.sector) &&
-    !updatedState.is_complete
+    !updatedState.is_complete &&
+    !(updatedState.quality_gate_passed && updatedState.intent_validated === null)
   ) {
     updatedState.is_complete = true;
     updatedState.phase = 'CLOSURE';
@@ -536,7 +568,9 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
   if (m4GuardShouldFire) {
     m4GuardFired = true;
     updatedState.is_complete = false;
-    updatedState.phase = 'QUALIFICATION';
+    // Keep MOMENTUM phase if qualification data is sufficient — prevents next turn from
+    // being treated as QUALIFICATION (which causes the LLM to be conservative and skip closure).
+    updatedState.phase = updatedState.is_sufficient ? 'MOMENTUM' : 'QUALIFICATION';
 
     if (updatedState.is_document_intake) {
       updatedState.is_document_intake = false;
@@ -546,15 +580,43 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
     }
     extraction.is_complete = false;
 
+    const sectorLabel = (updatedState.sector || 'target').replace(/_/g, ' ');
+    const bridgeMessage =
+      `Before I finalise this mandate, I need a few sector-specific details ` +
+      `about the ${sectorLabel} target to find the most aligned counterparties.`;
+
     if (!updatedState.m4_questions_asked) {
       // Case A — M4 never asked: replace the LLM's premature closure with a bridge.
-      const sectorLabel = (updatedState.sector || 'target').replace(/_/g, ' ');
-      messageOverride =
-        `Before I finalise this mandate, I need a few sector-specific details ` +
-        `about the ${sectorLabel} target to find the most aligned counterparties.`;
+      messageOverride = bridgeMessage;
       extraction.message = messageOverride;
+    } else {
+      // Case B — m4JustAsked: M4 loaded this turn for the first time.
+      // When the LLM is in CLOSURE context it generates "I have all the details I need."
+      // instead of actual M4 questions. Detect this and replace with the bridge so the
+      // user is not left with a dead-end closure message that has no mandate summary.
+      const llmGaveClosureMessage =
+        (extraction.message ?? '').toLowerCase().includes('all the details i need') ||
+        (extraction.message ?? '').toLowerCase().includes('summary for your review') ||
+        (extraction.message ?? '').length < 80;
+      if (llmGaveClosureMessage) {
+        messageOverride = bridgeMessage;
+        extraction.message = messageOverride;
+      }
+      // else: LLM actually generated M4 questions — keep them.
     }
-    // Case B — m4JustAsked: keep the LLM message (it already contains M4 questions).
+  }
+
+  // ── Sufficiency auto-close (eliminates the "Okay" gap) ─────────────────────
+  // When qualification is complete (is_sufficient + m4 asked) AND the context is CLOSURE
+  // (phase, round_count, or refinement limit), force STEP B to evaluate the quality gate
+  // even if the LLM returned is_complete=false (LLM being conservative in CLOSURE context).
+  if (!m4GuardFired && !updatedState.is_complete && !hasFriction &&
+      updatedState.is_sufficient && updatedState.m4_questions_asked &&
+      !updatedState.quality_gate_passed && updatedState.intent_validated === null &&
+      (candidateState.phase === 'CLOSURE' || updatedState.round_count >= 4 || updatedState.refinement_count >= 3)) {
+    updatedState.is_complete = true;
+    extraction.is_complete = true;
+    console.log('[RESOLVE] Sufficiency auto-close: is_sufficient=true in CLOSURE context — advancing to quality gate');
   }
 
   // ── STEP A: Mandate Verification Engine (NM8) ─────────────────────────────────
@@ -562,9 +624,11 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
   // layer 2 patching phase to CLOSURE, so we don't rely on phase for this check.
   if (updatedState.quality_gate_passed && updatedState.intent_validated === null) {
     const inNM8 = updatedState.phase === 'MANDATE_VERIFICATION'
-      || (updatedState.verification_step !== null && updatedState.verification_step !== 'COMPLETE');
+      || (!!updatedState.verification_step && updatedState.verification_step !== 'COMPLETE');
+    console.log(`[TEST-LOG] inNM8=${inNM8} phase=${updatedState.phase} step=${updatedState.verification_step} msg=${message}`);
 
     if (inNM8) {
+      updatedState.phase = 'MANDATE_VERIFICATION';
       const atConfirmation = updatedState.verification_step === 'CONFIRMATION';
       if (hasFriction && !atConfirmation) {
         // Friction signal past confirmation ("go ahead", "proceed") = skip remaining questions.
@@ -583,7 +647,8 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         // ── NM8: Multi-step verification state machine ──
         advanceMandateVerification(message, updatedState, extraction);
       }
-    } else if (updatedState.phase === 'INTENT_VALIDATION') {
+    } else {
+      updatedState.phase = 'INTENT_VALIDATION';
       // ── Legacy path: binary yes/no (backward compat for existing sessions) ──
       const decision = detectConfirmation(message, extraction.intent_validation);
       if (decision === 'yes') {
@@ -592,6 +657,9 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         updatedState.is_complete = true;
         updatedState.phase = 'CLOSURE';
         extraction.is_complete = true;
+        updatedState.is_captured = true;
+        messageOverride = CAPTURE_CONFIRMATION;
+        extraction.message = CAPTURE_CONFIRMATION;
       } else if (decision === 'no') {
         updatedState.intent_validated = false;
         updatedState.quality_gate_passed = false;
@@ -599,7 +667,11 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         updatedState.is_complete = false;
         updatedState.phase = 'QUALIFICATION';
         extraction.is_complete = false;
-        extraction.message = "Understood. Let's modify the details. What would you like to change?";
+        messageOverride = INTENT_DECLINED_MESSAGE;
+        extraction.message = INTENT_DECLINED_MESSAGE;
+      } else {
+        messageOverride = GENUINE_MANDATE_QUESTION;
+        extraction.message = GENUINE_MANDATE_QUESTION;
       }
     }
   }
@@ -624,6 +696,7 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         extraction.is_complete = false;
         extraction.message = q.message
           || 'I need a few more details to match this mandate effectively. Please provide the missing information.';
+        messageOverride = extraction.message;
       } else {
         // First failure — one extension.
         updatedState.quality_gate_attempted = true;
@@ -634,6 +707,7 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         extraction.is_complete = false;
         extraction.message = q.message
           || 'To register this mandate and begin matching, please provide the missing details.';
+        messageOverride = extraction.message;
       }
     } else if (updatedState.is_document_intake) {
       // For document intake, quality gate passed.
@@ -646,6 +720,7 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         updatedState.is_complete = true;
         updatedState.phase = 'CLOSURE';
         extraction.is_complete = true;
+        updatedState.is_captured = true;
       } else {
         console.log("[MANDATE_CAPTURED] Document mandate captured. Awaiting confirmation.");
         updatedState.quality_gate_passed = true;
@@ -656,20 +731,21 @@ export function resolveCompletion(input: ResolveCompletionInput): ResolveComplet
         updatedState.phase = 'INTENT_VALIDATION';
       }
     } else {
-      // Stage 2: Quality gate passed — show mandate summary for confirmation.
-      // This replaces all generic "Your requirement has been structured" messages with a
-      // structured summary that is clearly in-progress, not terminal.
-      console.log('[MANDATE_STRUCTURED] Quality gate passed — presenting mandate summary.');
+      // Quality gate passed — show the structured mandate summary.
+      // Route into NM8 CONFIRMATION step so the user sees WHAT was captured before
+      // activating. They reply YES/CONFIRM to activate or correct to edit.
+      // This replaces the bare "Reply YES" legacy message (GENUINE_MANDATE_QUESTION).
+      console.log('[MANDATE_STRUCTURED] Quality gate passed — presenting mandate summary for confirmation.');
       updatedState.quality_gate_passed = true;
       updatedState.quality_score = q.score;
       updatedState.is_complete = false;
       extraction.is_complete = false;
       updatedState.intent_validated = null;
-      updatedState.phase = 'MANDATE_VERIFICATION';
       updatedState.verification_step = 'CONFIRMATION';
-
-      // Show the structured mandate summary — verification begins on next turn after user confirms
-      extraction.message = buildMandateSummaryMessage(updatedState);
+      updatedState.phase = 'MANDATE_VERIFICATION';
+      const summaryMsg = buildMandateSummaryMessage(updatedState);
+      messageOverride = summaryMsg;
+      extraction.message = summaryMsg;
     }
   }
 
