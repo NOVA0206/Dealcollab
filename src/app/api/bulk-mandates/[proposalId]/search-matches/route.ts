@@ -52,6 +52,7 @@ export async function POST(
       mandateId: proposal.mandate_id,
       userId: proposal.user_id,
       intent: proposal.intent,
+      source: 'bulk_upload',
       raw_text: proposal.raw_text || '',
       sector: proposal.sectors?.[0] ?? null,
       sub_sector: null,

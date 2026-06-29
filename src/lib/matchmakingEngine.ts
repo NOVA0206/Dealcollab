@@ -55,6 +55,7 @@ export interface ProposalInput {
   document_url?: string | null;   // URL of uploaded PDF/doc (if any)
   document_text?: string | null;  // Extracted text from uploaded document
   id?: string;
+  source?: string;  // 'WEB' (chat) | 'bulk_upload' — preserved on upsert
 }
 
 interface Candidate {
@@ -839,7 +840,7 @@ export async function executeMatchmaking(
         quality_tier: computeQualityTier(input),
         embedding_status: 'GENERATING',
         status: 'ACTIVE',
-        source: 'WEB',
+        source: input.source ?? 'WEB',
       }])
       .select('id')
       .single();
