@@ -15,7 +15,7 @@ async function main() {
     console.log('Simulating GET /api/deals/bulk for target user...');
     
     // Fetch proposals (exactly like the API)
-    const { data: proposals, rows: proposalsRows } = await client.query(`
+    const { rows: proposalsRows } = await client.query(`
       SELECT id, intent, sectors, geographies, deal_size_min_cr, deal_size_max_cr, status, created_at, raw_text, normalised_text, summary_text, metadata, embedding_status
       FROM proposals
       WHERE user_id = $1
